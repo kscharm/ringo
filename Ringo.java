@@ -4,8 +4,9 @@ import java.net.*;
 
 public abstract class Ringo {
     public int numRingos;
-    private int portNum;
-    private String ipAddress;
-    private boolean isAlive;
+    public int port;
+    public InetAddress pocHost;
+    public int pocPort;
+    public boolean isAlive;
     public abstract void sendRTT(Ringo r, double[] vector);
 }
