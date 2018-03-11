@@ -47,9 +47,33 @@ public class RingoApp {
                 System.exit(0);
             }
         }
-        // TODO: send RTT vectors 
+        Scanner scan = new Scanner(System.in);
+        System.out.println("#### Ringo commands ####");
+        System.out.println("1) send <filename>");
+        System.out.println("2) show-matrix");
+        System.out.println("3) show-ring");
+        System.out.println("4) disconnect");
         while(true) {
-            // TODO: Ringo commands
+            System.out.print("Ringo command: ");
+            String input = scan.nextLine();
+            // TODO: Implement Ringo command functions
+            if (input.indexOf("send") != -1) {
+                // Send file
+                String filename = input.substring(input.indexOf(" ") + 1, input.length());
+                System.out.println("Sending file: " + filename);
+            } else if (input.equals("show-matrix")) {
+                // Show RTT vector matrix
+                System.out.println("--");
+            } else if (input.equals("show-ring")) {
+                // Show optimal ring formation
+                System.out.println("#### Optimal ring ####");
+            } else if (input.equals("disconnect")) {
+                // Terminate ringo process
+                scan.close();
+                System.exit(0);
+            } else {
+                System.out.println("Invalid input");
+            }
         }
     }
 }

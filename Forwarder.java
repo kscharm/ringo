@@ -9,8 +9,10 @@ public class Forwarder extends Ringo {
         this.pocHost = pocHost;
         this.pocPort = pocPort;
         this.numRingos = numRingos;
+        this.localRTT = new double[numRingos - 1];
         try {
             forwardSocket = new DatagramSocket();
+            sendRTT(pocPort, pocHost, localRTT);
         } catch (IOException e) {
             System.out.println("An I/O error has occured: " + e);
             System.exit(0);
@@ -28,7 +30,7 @@ public class Forwarder extends Ringo {
         
     }
 
-    public void sendRTT(Ringo r, double[] vector) {
+    public void sendRTT(int port, InetAddress host, double[] vector) {
 
     }
 }

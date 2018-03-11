@@ -8,5 +8,7 @@ public abstract class Ringo {
     public InetAddress pocHost;
     public int pocPort;
     public boolean isAlive;
-    public abstract void sendRTT(Ringo r, double[] vector);
+    public double[] localRTT;
+    public static Map<InetAddress, double[]> globalRTT;
+    public abstract void sendRTT(int p, InetAddress h, double[] vector);
 }
