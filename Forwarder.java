@@ -48,38 +48,39 @@ public class Forwarder extends Ringo {
                 outToRingo = packet.getBytes();
                 DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
                 try {
-                    forwardSocket.send(p);
                     forwardSocket.setSoTimeout(2000);
+                    forwardSocket.send(p);
+                    receiveMessage();
                 } catch (SocketTimeoutException e) {
-                    System.out.println("No resposne from POC. Retrying...");
-                    forwardSocket.send(p);
+                    System.out.println("No response from POC. Retrying...");
                     forwardSocket.setSoTimeout(2000);
+                    forwardSocket.send(p);
+                    receiveMessage();
                 }
             } catch (IOException e) {
                 System.out.println("An I/O error has occurred: " + e);
             }
         } 
-        try {
-            receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
-            forwardSocket.receive(receivePacket);
-            String message = new String(inFromRingo, 0, receivePacket.getLength());
-            System.out.println("Message: " + message);
-            String[] info = message.split(" ");
-            InetAddress ipaddr = null;
-            int port = 0;
-            try {
-                ipaddr = InetAddress.getByName(info[0]);
-                port = Integer.parseInt(info[1]);
-            } catch (NumberFormatException e) {
-                System.out.println("Invalid response: " + e);
-            }
-            if (ipaddr != null && port != 0) {
-                neighbors.add(new AddrPort(ipaddr, port));
-            }
-        } catch (IOException e) {
-            System.out.println("An I/O error has occurred: " + e);
-        }
         
+    }
+
+    private void receiveMessage() throws IOException {
+        receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
+        forwardSocket.receive(receivePacket);
+        String message = new String(inFromRingo, 0, receivePacket.getLength());
+        System.out.println("Message: " + message);
+        String[] info = message.split(" ");
+        InetAddress ipaddr = null;
+        int port = 0;
+        try {
+            ipaddr = InetAddress.getByName(info[0]);
+            port = Integer.parseInt(info[1]);
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid response: " + e);
+        }
+        if (ipaddr != null && port != 0) {
+            neighbors.add(new AddrPort(ipaddr, port));
+        }
     }
     public void receiveRTT() {
     }
