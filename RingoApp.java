@@ -3,6 +3,7 @@ import java.net.*;
 import java.util.*;
 
 public class RingoApp {
+    public static Map<InetAddress, double[]> globalRTT;
     public static void main(String[] args) {
         if (args.length < 5) {
             System.out.println("Insufficient arguments");
@@ -35,18 +36,21 @@ public class RingoApp {
             System.out.println("An I/O error has occured: " + e);
             System.exit(0);
         }
+        Ringo ringo;
+        globalRTT = new HashMap<InetAddress, double[]>(numRingos);
         if (port != -1 && pocHost != null && pocPort != -1 && numRingos != -1) {
             if (flag.equals("R")) {
-                Receiver r = new Receiver(port, pocHost, pocPort, numRingos);
+                ringo = new Receiver(port, pocHost, pocPort, numRingos);
             } else if (flag.equals("S")) {
-                Sender s = new Sender(port, pocHost, pocPort, numRingos);
+                ringo = new Sender(port, pocHost, pocPort, numRingos);
             } else if (flag.equals("F")) {
-                Forwarder f = new Forwarder(port, pocHost, pocPort, numRingos);
+                ringo = new Forwarder(port, pocHost, pocPort, numRingos);
             } else {
                 System.out.println("Invalid flag");
                 System.exit(0);
             }
         }
+        
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
         System.out.println("1) send <filename>");
