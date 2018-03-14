@@ -71,11 +71,12 @@ public class RingoApp {
                 receiveThread.start();
         } 
         if (ringo.neighbors.size() != numRingos - 1) {
+            System.out.println("Neighbor list: ");
+            Iterator<AddrPort> it = ringo.neighbors.iterator();
+            while (it.hasNext()) {
+                System.out.println(it.next().toString());
+            }
             // Start exchanging RTT
-        }
-        Iterator<AddrPort> it = ringo.neighbors.iterator();
-        while (it.hasNext()) {
-            System.out.println(it.next().toString());
         }
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
