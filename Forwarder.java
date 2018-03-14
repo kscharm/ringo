@@ -30,8 +30,8 @@ public class Forwarder extends Ringo {
     public void forward(DatagramPacket p) {
         try {
             // Forward to next ringo
+            forwardSocket.setSoTimeout(2000);
             forwardSocket.send(p);
-            forwardSocket.setSoTimeout(5000);
         } catch (IOException e) {
             System.out.println("An I/O error has occured: " + e);
             if (e instanceof SocketTimeoutException) {
@@ -47,26 +47,34 @@ public class Forwarder extends Ringo {
                 String packet = InetAddress.getLocalHost().toString() + " " + Integer.toString(port);
                 outToRingo = packet.getBytes();
                 DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
-                try {
-                    forwardSocket.setSoTimeout(2000);
-                    forwardSocket.send(p);
-                    receiveMessage();
-                } catch (SocketTimeoutException e) {
-                    System.out.println("No response from POC. Retrying...");
-                    forwardSocket.setSoTimeout(2000);
-                    forwardSocket.send(p);
-                    receiveMessage();
+                int retryAttempts = 5;
+                while (retryAttempts > 0) {
+                    try {
+                        forwardSocket.setSoTimeout(3000);
+                        forwardSocket.send(p);
+                        receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
+                        forwardSocket.receive(receivePacket);
+                        break;
+                    } catch (IOException e) {
+                        retryAttempts--;
+                        if (e instanceof SocketTimeoutException) {
+                            System.out.println("No response from POC. Retrying...");
+                        }
+                    } 
                 }
+                receiveMessage(receivePacket);
             } catch (IOException e) {
+                if (e instanceof SocketTimeoutException) {
+                    System.out.println("No response. Exiting...");
+                }
                 System.out.println("An I/O error has occurred: " + e);
+                System.exit(0);
             }
         } 
         
     }
 
-    private void receiveMessage() throws IOException {
-        receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
-        forwardSocket.receive(receivePacket);
+    private void receiveMessage(DatagramPacket receivePacket) throws IOException {
         String message = new String(inFromRingo, 0, receivePacket.getLength());
         System.out.println("Message: " + message);
         String[] info = message.split(" ");
@@ -81,6 +89,7 @@ public class Forwarder extends Ringo {
         if (ipaddr != null && port != 0) {
             neighbors.add(new AddrPort(ipaddr, port));
         }
+        System.out.println(neighbors.toString());
     }
     public void receiveRTT() {
     }
