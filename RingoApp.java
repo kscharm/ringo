@@ -4,24 +4,35 @@ import java.util.*;
 
 public class RingoApp {
     public static Map<InetAddress, double[]> globalRTT;
+    public static DatagramSocket socket = null;
+    public static InetAddress pocHost = null;
+    public static int port = -1;
+    public static int pocPort = -1;
+    public static int numRingos = -1;
+    public static InetAddress ipaddr = null;
+    public static byte[] outToRingo = new byte[1024];
+    public static byte[] inFromRingo  = new byte[1024];
+    Runnable thread1, thread2;
+    Thread receiveThread, sendThread;
+    Ringo ringo = null;
     public static void main(String[] args) {
+        RingoApp app = new RingoApp();
+        app.start(args);
+    }
+    public void start(String[] args) {
         if (args.length < 5) {
             System.out.println("Insufficient arguments");
             System.exit(0);
         }
         System.out.println("Welcome to Ringo!");
-        InetAddress ipaddr = null; 
         String flag = null;
-        int port = -1;
-        InetAddress pocHost = null;
-        int pocPort = -1;
-        int numRingos = -1;
         try {
             flag = args[0];
             pocHost = InetAddress.getByName(args[2]);
             try {
                 port = Integer.parseInt(args[1]);
                 pocPort = Integer.parseInt(args[3]);
+                socket = new DatagramSocket(port);
             } catch(NumberFormatException e) {
                 System.out.println("Invalid port number: " + e);
                 System.exit(0);
@@ -36,7 +47,6 @@ public class RingoApp {
             System.out.println("An I/O error has occured: " + e);
             System.exit(0);
         }
-        Ringo ringo = null;
         globalRTT = new HashMap<InetAddress, double[]>(numRingos);
         if (port != -1 && pocHost != null && pocPort != -1 && numRingos != -1) {
             if (flag.equals("R")) {
@@ -50,10 +60,21 @@ public class RingoApp {
                 System.exit(0);
             }
         }
+        thread1 = new ReceiveThread();
+        thread2 = new SendThread();
+        receiveThread = new Thread(thread1);
+        sendThread = new Thread(thread2);
+        receiveThread.start();
+        sendThread.start();
         while (ringo.neighbors.size() != numRingos - 1) {
-            ringo.peerDiscovery();
+            if (!ringo.pocHost.toString().equals("0") && ringo.pocPort != 0) {
+            sendThread.send(ringo.pocHost, ringo.pocPort, ringo.neighbors);
+            receiveThread.receive();
+            } else {
+                receiveThread.receive();
+            } 
         }
-        Iterator<Ringo.AddrPort> it = ringo.neighbors.iterator();
+        Iterator<AddrPort> it = ringo.neighbors.iterator();
         while (it.hasNext()) {
             System.out.println(it.next().toString());
         }
@@ -85,5 +106,95 @@ public class RingoApp {
                 System.out.println("Invalid input");
             }
         }
+    }
+
+    private void receiveMessage(DatagramPacket receivePacket) throws IOException {
+        String message = new String(inFromRingo, 0, receivePacket.getLength());
+        String[] info = message.split(" ");
+        InetAddress ipaddr = null;
+        int port = 0;
+        try {
+            String ip = "";
+            if (info[0].indexOf("/") != -1) {
+                ip = info[0].substring(info[0].indexOf("/") + 1, info[0].length());
+            }
+            ipaddr = InetAddress.getByName(ip);
+            port = Integer.parseInt(info[1]);
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid response: " + e);
+        }
+        if (ipaddr != null && port != 0) {
+            ringo.neighbors.add(new AddrPort(ipaddr, port));
+        }
+    }
+    class ReceiveThread implements Runnable {
+        private SendThread send;
+        public void run() {
+            receive();
+        }
+
+        public void receive() {
+            DatagramPacket receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
+            socket.receive(receivePacket);
+            if (receivePacket.getLength() != inFromRingo.length) {
+                receiveMessage(receivePacket);
+                // String packet1 = InetAddress.getLocalHost().toString() + " " + Integer.toString(port);
+                // outToRingo = packet1.getBytes();
+                // DatagramPacket p1 = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
+                // forwardSocket.send(p1);
+            }
+        }
+    }
+
+    class SendThread implements Runnable {
+        public void run() {
+            send(ringo.pocHost, ringo.pocPort, ringo.neighbors);
+        }
+        public void send(InetAddress pocHost, int pocPort, Set<AddrPort> neighbors) {
+            try {
+                // Loop through neighbors to send all
+                Iterator<AddrPort> it = ringo.neighbors.iterator();
+                while (it.hasNext()) {
+                    String s = it.next().toString();
+                    outToRingo = s.getBytes();
+                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
+                    int retryAttempts = 5;
+                    try {
+                        socket.setSoTimeout(3000);
+                        socket.send(p);
+                    } catch (IOException e) {
+                        if (e instanceof SocketTimeoutException) {
+                            System.out.println("No response from POC. Retrying...");
+                        }
+                    } 
+                }
+            } catch (IOException e) {
+                if (e instanceof SocketTimeoutException) {
+                    System.out.println("No response. Exiting...");
+                }
+                System.out.println("An I/O error has occurred: " + e);
+                System.exit(0);
+            }
+        }
+    }
+}
+
+class Timer {
+    long timer;
+    Timer() {
+        timer = System.currentTimeMillis();
+    }
+}
+
+class AddrPort {
+    InetAddress addr;
+    int p;
+    public AddrPort(InetAddress addr, int p) {
+        this.addr = addr;
+        this.p = p;
+    }
+
+    public String toString() {
+        return "(" + addr + ", " + p + ")";
     }
 }
