@@ -64,15 +64,14 @@ public class RingoApp {
         thread2 = new SendThread();
         receiveThread = new Thread(thread1);
         sendThread = new Thread(thread2);
-        receiveThread.start();
-        sendThread.start();
-        while (ringo.neighbors.size() != numRingos - 1) {
-            if (!ringo.pocHost.toString().equals("0") && ringo.pocPort != 0) {
-            sendThread.send(ringo.pocHost, ringo.pocPort, ringo.neighbors);
-            receiveThread.receive();
-            } else {
-                receiveThread.receive();
-            } 
+        if (!ringo.pocHost.toString().equals("0") && ringo.pocPort != 0) {
+                sendThread.start();
+                receiveThread.start();
+        } else {
+                receiveThread.start();
+        } 
+        if (ringo.neighbors.size() != numRingos - 1) {
+            // Start exchanging RTT
         }
         Iterator<AddrPort> it = ringo.neighbors.iterator();
         while (it.hasNext()) {
@@ -135,13 +134,18 @@ public class RingoApp {
 
         public void receive() {
             DatagramPacket receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
-            socket.receive(receivePacket);
-            if (receivePacket.getLength() != inFromRingo.length) {
-                receiveMessage(receivePacket);
-                // String packet1 = InetAddress.getLocalHost().toString() + " " + Integer.toString(port);
-                // outToRingo = packet1.getBytes();
-                // DatagramPacket p1 = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
-                // forwardSocket.send(p1);
+            try {
+                socket.receive(receivePacket);
+                if (receivePacket.getLength() != inFromRingo.length) {
+                    receiveMessage(receivePacket);
+                    // String packet1 = InetAddress.getLocalHost().toString() + " " + Integer.toString(port);
+                    // outToRingo = packet1.getBytes();
+                    // DatagramPacket p1 = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
+                    // forwardSocket.send(p1);
+                }
+            } catch (IOException e) {
+                System.out.println("An I/O error has occurred: " + e);
+                System.exit(0);
             }
         }
     }
@@ -151,29 +155,21 @@ public class RingoApp {
             send(ringo.pocHost, ringo.pocPort, ringo.neighbors);
         }
         public void send(InetAddress pocHost, int pocPort, Set<AddrPort> neighbors) {
-            try {
-                // Loop through neighbors to send all
-                Iterator<AddrPort> it = ringo.neighbors.iterator();
-                while (it.hasNext()) {
-                    String s = it.next().toString();
-                    outToRingo = s.getBytes();
-                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
-                    int retryAttempts = 5;
-                    try {
-                        socket.setSoTimeout(3000);
-                        socket.send(p);
-                    } catch (IOException e) {
-                        if (e instanceof SocketTimeoutException) {
-                            System.out.println("No response from POC. Retrying...");
-                        }
-                    } 
-                }
-            } catch (IOException e) {
-                if (e instanceof SocketTimeoutException) {
-                    System.out.println("No response. Exiting...");
-                }
-                System.out.println("An I/O error has occurred: " + e);
-                System.exit(0);
+            // Loop through neighbors to send all
+            Iterator<AddrPort> it = ringo.neighbors.iterator();
+            while (it.hasNext()) {
+                String s = it.next().toString();
+                outToRingo = s.getBytes();
+                DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
+                int retryAttempts = 5;
+                try {
+                    socket.setSoTimeout(3000);
+                    socket.send(p);
+                } catch (IOException e) {
+                    if (e instanceof SocketTimeoutException) {
+                        System.out.println("No response from POC. Retrying...");
+                    }
+                } 
             }
         }
     }
