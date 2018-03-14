@@ -9,8 +9,9 @@ public abstract class Ringo {
     public int pocPort;
     public boolean isAlive;
     public double[] localRTT;
-    public List<AddrPort> neighbors = new ArrayList<AddrPort>();
+    public static Set<AddrPort> neighbors = new HashSet<AddrPort>();
     public abstract void sendRTT(int p, InetAddress h, double[] vector);
+    public abstract void peerDiscovery();
 
     class AddrPort {
         InetAddress addr;
@@ -18,6 +19,10 @@ public abstract class Ringo {
         public AddrPort(InetAddress addr, int p) {
             this.addr = addr;
             this.p = p;
+        }
+
+        public String toString() {
+            return "(" + addr + ", " + p + ")";
         }
     }
 }

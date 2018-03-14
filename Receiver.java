@@ -11,9 +11,9 @@ public class Receiver extends Ringo {
         this.localRTT = new double[numRingos - 1];
         sendRTT(pocPort, pocHost, localRTT);
     }
-
+    public void peerDiscovery() {
+    }
     public void receive(DatagramPacket p) {
-
     }
 
     public void sendRTT(int port, InetAddress host, double[] vector) {

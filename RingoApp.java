@@ -36,7 +36,7 @@ public class RingoApp {
             System.out.println("An I/O error has occured: " + e);
             System.exit(0);
         }
-        Ringo ringo;
+        Ringo ringo = null;
         globalRTT = new HashMap<InetAddress, double[]>(numRingos);
         if (port != -1 && pocHost != null && pocPort != -1 && numRingos != -1) {
             if (flag.equals("R")) {
@@ -50,7 +50,13 @@ public class RingoApp {
                 System.exit(0);
             }
         }
-        
+        while (ringo.neighbors.size() != numRingos - 1) {
+            ringo.peerDiscovery();
+        }
+        Iterator<Ringo.AddrPort> it = ringo.neighbors.iterator();
+        while (it.hasNext()) {
+            System.out.println(it.next().toString());
+        }
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
         System.out.println("1) send <filename>");
