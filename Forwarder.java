@@ -8,7 +8,7 @@ public class Forwarder extends Ringo {
         this.pocHost = pocHost;
         this.pocPort = pocPort;
         this.numRingos = numRingos;
-        this.localRTT = new double[numRingos - 1];
+        this.localRTT = new long[numRingos];
     }
 
     public void forward(DatagramPacket p) {
