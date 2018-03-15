@@ -13,6 +13,7 @@ public class RingoApp {
     public static byte[] outToRingo = new byte[1024];
     public static byte[] inFromRingo  = new byte[1024];
     boolean discovery = true;
+    boolean isFull = false;
     Runnable thread1, thread2;
     Thread receiveThread, sendThread;
     Ringo ringo = null;
@@ -32,6 +33,13 @@ public class RingoApp {
             pocHost = InetAddress.getByName(args[2]);
             try {
                 ipaddr = InetAddress.getLocalHost();
+                System.out.println(ipaddr.toString());
+                String ip = ipaddr.toString();
+                if (ipaddr.toString().indexOf("/") != -1) {
+                    ip = ip.substring(ip.indexOf("/") + 1, ip.length());
+                    System.out.println(ip);
+                }
+                ipaddr = InetAddress.getByName(ip);
                 port = Integer.parseInt(args[1]);
                 pocPort = Integer.parseInt(args[3]);
                 socket = new DatagramSocket(port);
@@ -75,14 +83,18 @@ public class RingoApp {
         receiveThread.start();
 
         // Check to see if we know everyone
+
         if (ringo.active.size() == numRingos) {
             discovery = false;
+            /*
             System.out.println("Active list: ");
             Iterator<AddrPort> it = ringo.active.iterator();
             while (it.hasNext()) {
                 System.out.println(it.next().toString());
             }
+            */
         }
+
         // TODO: Start exchanging RTT
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
@@ -103,9 +115,8 @@ public class RingoApp {
             } else if (input.equals("show-ring")) {
                 // Show optimal ring formation
                 System.out.println("#### Optimal ring ####");
-                Iterator<AddrPort> it = ringo.active.iterator();
-                while (it.hasNext()) {
-                    System.out.println(it.next().toString());
+                for (int i = 0; i < ringo.active.size(); i++) {
+                    System.out.println(ringo.active.toArray()[i].toString());
                 }
             } else if (input.equals("disconnect")) {
                 // Terminate ringo process
@@ -127,17 +138,31 @@ public class RingoApp {
             InetAddress recAddr = null;
             int recPort = 0;
             try {
+                /*
                 String ip = "";
                 if (info[0].indexOf("/") != -1) {
-                    ip = info[0].substring(info[0].indexOf("/") + 1, info[0].length());
-                }
-                recAddr = InetAddress.getByName(ip);
+                ip = info[0].substring(info[0].indexOf("/") + 1, info[0].length());
+            }
+            */
+                recAddr = InetAddress.getByName(info[0]);
                 recPort = Integer.parseInt(info[1]);
+
+                System.out.println(ipaddr.toString() + ":" + port + " has received " + new AddrPort(recAddr, recPort).toString());
+
             } catch (NumberFormatException e) {
                 System.out.println("Invalid response: " + e);
             }
-            if (recAddr != null && recPort != 0) {
-                ringo.active.add(new AddrPort(recAddr, recPort));
+            AddrPort tba = new AddrPort(recAddr, recPort);
+            if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
+                ringo.active.add(tba);
+            }
+            if (ringo.active.size() == numRingos) {
+                isFull = true;
+            }
+
+            System.out.println("Active List:");
+            for (int i = 0; i < ringo.active.size(); i++) {
+                System.out.println("Index " + i + ": " + ringo.active.get(i).toString());
             }
         }
     }
@@ -155,24 +180,31 @@ public class RingoApp {
                         receiveMessage(receivePacket);
                     }
                     if (discovery) {
-                        Iterator<AddrPort> it = ringo.active.iterator();
-                        while (it.hasNext()) {
-                            String sendLoc = it.next().toString();
-                            String s1 = sendLoc.substring(sendLoc.indexOf("/") + 1, sendLoc.indexOf(",") - 1);
-                            InetAddress sendIp = InetAddress.getByName(s1);
-                            String s2 = sendLoc.substring(sendLoc.indexOf(",") + 1, sendLoc.indexOf(")") - 1);
-                            int sendPort = Integer.parseInt(s2);
-                            try {
-                                Iterator<AddrPort> it1 = ringo.active.iterator();
-                                while(it1.hasNext()) {
-                                    String payload = it1.next().toString();
-                                    outToRingo = payload.getBytes();
-                                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
-                                    socket.send(p);
+                        try {
+                            for (int i = 0; i < ringo.active.size(); i++) {
+                                System.out.println("i: " + i);
+                                String sendLoc = ringo.active.get(i).toString();
+                                String s1 = sendLoc.substring(0, sendLoc.indexOf(","));
+                                InetAddress sendIp = InetAddress.getByName(s1);
+                                String s2 = sendLoc.substring(sendLoc.indexOf(",") + 1, sendLoc.indexOf(")"));
+                                int sendPort = Integer.parseInt(s2);
+
+                                for (int j = 0; j < ringo.active.size(); j++) {
+                                    System.out.println("j: " + j);
+                                    if (sendPort != port) {
+                                        String payload = ringo.active.get(j).toString();
+                                        System.out.println(ipaddr.toString() + ":" + port + " is sending to " + sendIp + ":" + sendPort + " " + payload);
+                                        outToRingo = payload.getBytes();
+                                        DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                                        socket.send(p);
+                                    }
                                 }
-                            } catch (IOException e) {
-                                System.out.println("An I/O error has occurred while sending: " + e);
-                            } 
+                            }
+                            if (isFull) {
+                                discovery = false;
+                            }
+                        }catch (IOException e) {
+                            System.out.println("An I/O error has occurred while sending: " + e);
                         }
                     }
                 }
@@ -187,15 +219,15 @@ public class RingoApp {
         public void run() {
             send(ringo.pocHost, ringo.pocPort, ringo.active);
         }
-        public void send(InetAddress pocHost, int pocPort, Set<AddrPort> active) {
+        public void send(InetAddress pocHost, int pocPort, List<AddrPort> active) {
             // Loop through active to send all
+            byte[] sendData = new byte[1024];
             if (discovery && !pocHost.toString().equals("0") && pocPort != 0) {
-                Iterator<AddrPort> it = ringo.active.iterator();
-                while (it.hasNext()) {
-                    String s = it.next().toString();
-                    System.out.println(s);
-                    outToRingo = s.getBytes();
-                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, pocHost, pocPort);
+               for (int i = 0; i < ringo.active.size(); i++) {
+                    String s = ringo.active.get(i).toString();
+                    //System.out.println(s);
+                    sendData = s.getBytes();
+                    DatagramPacket p = new DatagramPacket(sendData, sendData.length, pocHost, pocPort);
                     try {
                         socket.send(p);
                     } catch (IOException e) {
