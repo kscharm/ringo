@@ -170,31 +170,40 @@ public class RingoApp {
                                         }
                                     }
                                 }
-                                newData = false;
                             } catch (IOException e) {
                                 System.out.println("An I/O error has occurred while sending: " + e);
                             }
                         }
                         if (rttTransfer) {
-                            try {
-                                for (int i = 0; i < ringo.active.size(); i++) {
-                                    Node n = ringo.active.get(i);
-                                    InetAddress sendIp = InetAddress.getByName(n.addr);
-                                    int sendPort = n.port;
-                                    for (int j = 0; j < ringo.active.size(); j++) {
-                                        if (sendPort != port) {
-                                            String payload = ringo.active.get(j).toString();
-                                            outToRingo = payload.getBytes();
-                                            DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
-                                            socket.send(p);
-                                        }
+                            Iterator it = globalRTT.entrySet().iterator();
+                            while (it.hasNext()) {
+                                Map.Entry pair = (Map.Entry)it.next();
+                                Node n = (Node)pair.getKey();
+                                NodeTime[] nt = (NodeTime[])pair.getValue();
+                                // Attach parent to packet
+                                String payload = n.toString() + "|";
+                                // Stringify all the local RTT entires
+                                for (int i = 0; i < nt.length; i++) {
+                                    if (i == nt.length - 1) {
+                                        payload += nt[i].toString();
+                                    } else {
+                                        payload += nt[i].toString() + "|";
                                     }
+                                    
                                 }
-                                newData = false;
-                            } catch (IOException e) {
-                                System.out.println("An I/O error has occurred while sending: " + e);
+                                // Send the payload to every ringo
+                                for (int j = 0; j < ringo.active.size(); j++) {
+                                    Node neighbor = ringo.active.get(j);
+                                    InetAddress sendIp = InetAddress.getByName(neighbor.addr);
+                                    int sendPort = neighbor.port;
+                                    outToRingo = payload.getBytes();
+                                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                                    socket.send(p);
+                                }
+                                it.remove();
                             }
                         }
+                        newData = false;
                     }
                     // Check to see if we know everyone
                     if (ringo.active.size() == numRingos) {
@@ -202,7 +211,12 @@ public class RingoApp {
                         rttCalc = true;
                         check();
                         break;
-                        //System.out.println("Discovery is over");
+                    }
+                    // Check to see if we know all RTTs
+                    if (globalRTT.size() == numRingos) {
+                        rttTransfer = false;
+                        System.out.println("Done");
+                        break;
                     }
                 }
             } catch (IOException e) {
@@ -222,24 +236,50 @@ public class RingoApp {
             // Loop through active to send all
             byte[] sendData = new byte[2048];
             while (true) {
-                if (!pocHost.toString().equals("0") && pocPort != 0) {
-                    if (discovery) {
-                        for (int i = 0; i < ringo.active.size(); i++) {
-                            String s = ringo.active.get(i).toString();
-                            sendData = s.getBytes();
-                            DatagramPacket p = new DatagramPacket(sendData, sendData.length, pocHost, pocPort);
-                            try {
+                try {
+                    if (!pocHost.toString().equals("0") && pocPort != 0) {
+                        if (discovery) {
+                            for (int i = 0; i < ringo.active.size(); i++) {
+                                String s = ringo.active.get(i).toString();
+                                sendData = s.getBytes();
+                                DatagramPacket p = new DatagramPacket(sendData, sendData.length, pocHost, pocPort);
                                 socket.send(p);
-                            } catch (IOException e) {
-                                System.out.println("An I/O error has occurred while sending: " + e);
+                            }
+                        }
+                        if (rttTransfer) {
+                            System.out.println("RTT Transfer start");
+                            Iterator it = globalRTT.entrySet().iterator();
+                            while (it.hasNext()) {
+                                Map.Entry pair = (Map.Entry)it.next();
+                                Node n = (Node)pair.getKey();
+                                NodeTime[] nt = (NodeTime[])pair.getValue();
+                                // Attach parent to packet
+                                String payload = n.toString() + "|";
+                                // Stringify all the local RTT entires
+                                for (int i = 0; i < nt.length; i++) {
+                                    if (i == nt.length - 1) {
+                                        payload += nt[i].toString();
+                                    } else {
+                                        payload += nt[i].toString() + "|";
+                                    }
+                                    
+                                }
+                                System.out.println("Sending message: " + payload);
+                                // Send the payload to every ringo
+                                for (int j = 0; j < ringo.active.size(); j++) {
+                                    outToRingo = payload.getBytes();
+                                    Node neighbor = ringo.active.get(j);
+                                    InetAddress sendIp = InetAddress.getByName(neighbor.addr);
+                                    int sendPort = neighbor.port;
+                                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                                    socket.send(p);
+                                }
+                                it.remove();
                             }
                         }
                     }
-                    if (rttTransfer) {
-                        for (int i = 0; i < globalRTT.size(); i++) {
-                            
-                        }
-                    }
+                } catch (IOException e) {
+                    System.out.println("An I/O error has occurred: " + e);
                 }
             }
         }
@@ -258,10 +298,10 @@ public class RingoApp {
         String message = new String(inFromRingo, 0, receivePacket.getLength());
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
+        String recAddr = null;
+        int recPort = 0;
         if (discovery) {
             String[] info = message.split(",");
-            String recAddr = null;
-            int recPort = 0;
             try {
                 recAddr = info[0];
                 recPort = Integer.parseInt(info[1]);
@@ -273,14 +313,36 @@ public class RingoApp {
                 ringo.active.add(tba);
                 newData = true;
             }
-
-            System.out.println("Active List:");
-            for (int i = 0; i < ringo.active.size(); i++) {
-                System.out.println("Index " + i + ": " + ringo.active.get(i).toString());
-            }
         }
         if (rttTransfer) {
-
+            System.out.println("Receiving message");
+            String[] info = message.split("|");
+            NodeTime[] ntArray = new NodeTime[numRingos];
+            Node parent = null;
+            for (int i = 0; i < info.length; i++) {
+                String[] entry = info[i].split(",");
+                try {
+                    recAddr = entry[0];
+                    recPort = Integer.parseInt(entry[1]);
+                    Node n = new Node(recAddr, recPort);
+                    if (i == 0) {
+                        if (globalRTT.containsKey(n)) {
+                            break;
+                        }
+                        parent = n;
+                    } else {
+                        int time = Integer.parseInt(entry[2]);
+                        NodeTime nt = new NodeTime(n, time);
+                        ntArray[i - 1] = nt;
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid response: " + e);
+                }
+            }
+            if (!globalRTT.containsKey(parent)) {
+                globalRTT.put(parent, ntArray);
+                newData = true;
+            }
         }
     }
 
@@ -297,8 +359,8 @@ public class RingoApp {
                     }
                 }
                 rttCalc = false;
-                globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
                 rttTransfer = true;
+                globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
                 break;
             }
         }
@@ -310,7 +372,7 @@ public class RingoApp {
             long start = System.currentTimeMillis();
             System.out.println("Start: " + start);
             long finish = 0;
-            if (ipaddr.isReachable(5000)) {
+            if (ipaddr.isReachable(4000)) {
                 finish = System.currentTimeMillis();
                 System.out.println("Finish: " + finish);
                 return finish - start;
@@ -379,7 +441,7 @@ class NodeTime {
 
     @Override
     public String toString() {
-        return "(" + n.toString() + "," + rtt + ")";
+        return  n.toString() + "," + rtt;
     }
 
     @Override
