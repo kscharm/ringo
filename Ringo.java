@@ -9,5 +9,5 @@ public abstract class Ringo {
     public int pocPort;
     public boolean isAlive;
     public double[] localRTT;
-    public static Set<AddrPort> neighbors = new HashSet<AddrPort>();
+    public static Set<AddrPort> active = new HashSet<AddrPort>();
 }
