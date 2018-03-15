@@ -8,7 +8,7 @@ public class Receiver extends Ringo {
         this.pocHost = pocHost;
         this.pocPort = pocPort;
         this.numRingos = numRingos;
-        this.localRTT = new long[numRingos];
+        this.localRTT = new NodeTime[numRingos];
     }
     
     public void receive(DatagramPacket p) {

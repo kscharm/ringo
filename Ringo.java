@@ -8,6 +8,6 @@ public abstract class Ringo {
     public InetAddress pocHost;
     public int pocPort;
     public boolean isAlive;
-    public long[] localRTT;
+    public NodeTime[] localRTT;
     public static List<Node> active = new ArrayList<>();
 }
