@@ -12,11 +12,15 @@ public class RingoApp {
     public static String ipaddr = null;
     public static byte[] outToRingo = new byte[2048];
     public static byte[] inFromRingo  = new byte[2048];
+
     boolean discovery = true;
     boolean isFull = false;
+    boolean rtt = false;
+
     Runnable thread1, thread2;
     Thread receiveThread, sendThread;
     Ringo ringo = null;
+
     public static void main(String[] args) {
         RingoApp app = new RingoApp();
         app.start(args);
@@ -222,17 +226,27 @@ public class RingoApp {
 
     class SendThread implements Runnable {
         public void run() {
-            send(ringo.pocHost, ringo.pocPort, ringo.active);
+            send();
         }
-        public void send(InetAddress pocHost, int pocPort, List<AddrPort> active) {
+        public void send() {
             // Loop through active to send all
             byte[] sendData = new byte[2048];
             if (discovery && !pocHost.toString().equals("0") && pocPort != 0) {
                for (int i = 0; i < ringo.active.size(); i++) {
                    String s = ringo.active.get(i).toString();
+                   String sendLoc = ringo.active.get(i).toString();
+                   String s1 = sendLoc.substring(1, sendLoc.indexOf(","));
+                   InetAddress sendIp = null;
+                   try {
+                       sendIp = InetAddress.getByName(s1);
+                   } catch (UnknownHostException e) {
+                       System.out.println(e);
+                   }
+                   String s2 = sendLoc.substring(sendLoc.indexOf(",") + 1, sendLoc.indexOf(")"));
+                   int sendPort = Integer.parseInt(s2);
                    //System.out.println(s);
                    sendData = s.getBytes();
-                   DatagramPacket p = new DatagramPacket(sendData, sendData.length, pocHost, pocPort);
+                   DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
                    try {
                        socket.send(p);
                        //try {
