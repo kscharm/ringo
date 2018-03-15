@@ -14,8 +14,4 @@ public class Sender extends Ringo {
     public void send(DatagramPacket p) {
 
     }
-
-    public void sendRTT(int port, InetAddress host, double[] vector) {
-
-    }
 }
