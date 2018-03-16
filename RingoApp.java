@@ -208,13 +208,15 @@ public class RingoApp {
                         newData = false;
                     }
                     // Check to see if we know everyone
-                    if (ringo.active.size() == numRingos) {
+                    if (discovery && ringo.active.size() == numRingos) {
                         System.out.println("Peer discovery completed");
                         discovery = false;
                         receiveThread.sleep(100);
                         rttCalc = true;
                         check();
                     }
+                    
+                    // Check to see if local RTT vector calculations have completed
                     if (!discovery && ringo.localRTT.length == numRingos) {
                         System.out.println("Local RTT vector calculations completed");
                         rttCalc = false;
@@ -350,6 +352,7 @@ public class RingoApp {
             }
         }
         if (rttTransfer) {
+            System.out.println("Received: " + message);
             String[] info = message.split("\\|");
             NodeTime[] ntArray = new NodeTime[numRingos];
             Node parent = null;
