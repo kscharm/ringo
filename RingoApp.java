@@ -31,6 +31,9 @@ public class RingoApp {
         RingoApp app = new RingoApp();
         app.start(args);
     }
+    /**
+     * Launches the Ringo application and starts the command-line interface
+     */
     public void start(String[] args) {
         // Parse arguments
         if (args.length < 5) {
@@ -46,7 +49,6 @@ public class RingoApp {
                 ipaddr = InetAddress.getLocalHost().toString();
                 if (ipaddr.toString().indexOf("/") != -1) {
                     ipaddr = ipaddr.substring(ipaddr.indexOf("/") + 1, ipaddr.length());
-                //    System.out.println(ip);
                 }
                 port = Integer.parseInt(args[1]);
                 pocPort = Integer.parseInt(args[3]);
@@ -87,16 +89,11 @@ public class RingoApp {
         // Start threads
         thread1 = new ReceiveThread();
         thread2 = new SendThread();
-        // thread3 = new CheckThread();
         receiveThread = new Thread(thread1);
         sendThread = new Thread(thread2);
-        // checkThread = new Thread(thread3);
         receiveThread.start();
         sendThread.start();
-        // checkThread.start();
 
-
-        // TODO: Start exchanging RTT
         // TODO: Find optimal ring
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
@@ -108,7 +105,7 @@ public class RingoApp {
         while(true) {
             System.out.print("Ringo command: ");
             String input = scan.nextLine();
-            // TODO: Implement Ringo command functions
+            // TODO: Implement send
             if (input.indexOf("send") != -1) {
                 // Send file
                 String filename = input.substring(input.indexOf(" ") + 1, input.length());
@@ -142,12 +139,17 @@ public class RingoApp {
         public void run() {
             receive();
         }
-
+        /**
+         * Receives incoming packets, parses each packet depending on the current flag, and broadcasts it to all other Ringos.
+         * Currently supports peer discovery and RTT transfer.
+         */
         public void receive() {
             DatagramPacket receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
             try {
+                // Always be receiving incoming packets
                 while (true) {
                     socket.receive(receivePacket);
+                    // Check to see if the packet we have received is not empty
                     if (receivePacket.getLength() != inFromRingo.length) {
                         receiveMessage(receivePacket);
                     }
@@ -246,9 +248,13 @@ public class RingoApp {
         public void run() {
             send();
         }
+        /**
+         * Creates a new packet and sends it to all other active Ringos.
+         * Currently supports peer discovery and RTT transfer.
+         */
         public void send() {
-            // Loop through active to send all
             byte[] sendData = new byte[2048];
+            // Loop through active to send all
             while (true) {
                 try {
                     if (!pocHost.toString().equals("0") && pocPort != 0) {
@@ -264,6 +270,7 @@ public class RingoApp {
                         
                         if (rttTransfer) {
                             synchronized(globalRTT) {
+                                // Iterate through global RTT matrix and send each entry to all other Ringos
                                 Iterator it = globalRTT.entrySet().iterator();
                                 while (it.hasNext()) {
                                     Map.Entry pair = (Map.Entry)it.next();
@@ -306,31 +313,10 @@ public class RingoApp {
             }
         }
     }
-    class CheckThread implements Runnable {
-        public void run() {
-            check();
-        }
-
-        public void check() {
-            while (!Thread.currentThread().isInterrupted()) {
-                if (rttCalc) {
-                    for (int i = 0; i < ringo.active.size(); i++) {
-                        Node n = ringo.active.get(i);
-                        if (n.addr.equals(ipaddr) && n.port == port) {
-                            ringo.localRTT[i] = new NodeTime(n, 0);
-                        } else {
-                            ringo.localRTT[i] = new NodeTime(n, calcRTT(n.addr, n.port));
-                        }
-                    }
-                    synchronized(globalRTT) {
-                        globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
+    
+    /**
+     * Parses a message and extracts important information, depending on the flag.
+     */
     private void receiveMessage(DatagramPacket receivePacket) throws IOException {
         String message = new String(inFromRingo, 0, receivePacket.getLength());
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
@@ -387,12 +373,17 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Calculates the Round-Trip Time (RTT) by pinging a given IP address and port
+     * and returning the amount of time it takes.
+     */
     private static long calcRTT(String ip, int port) {
         try {
             InetAddress ipaddr = InetAddress.getByName(ip);
             long start = System.currentTimeMillis();
             long finish = 0;
-            if (ipaddr.isReachable(4000)) {
+            // Ping the IP and see if we get a response
+            if (ipaddr.isReachable(5000)) {
                 finish = System.currentTimeMillis();
                 return finish - start;
             } else {
@@ -405,6 +396,10 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Checks to see if we are in the calculate RTT state. If so,
+     * add a new entry into the globalRTT matrix.
+     */
     public void check() {
         if (rttCalc) {
             for (int i = 0; i < ringo.active.size(); i++) {
@@ -422,6 +417,9 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Prints the global RTT matrix
+     */
     public static void printMap(Map mp) {
         Iterator it = mp.entrySet().iterator();
         while (it.hasNext()) {
@@ -437,7 +435,9 @@ public class RingoApp {
 }
 
 
-
+/**
+ * Node class that represents a Ringo
+ */
 class Node {
     String addr;
     int port;
@@ -475,6 +475,9 @@ class Node {
     }
 }
 
+/**
+ * NodeTime class that represents a Ringo and it's coresponding RTT
+ */
 class NodeTime {
     Node n;
     long rtt;
