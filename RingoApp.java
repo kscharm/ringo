@@ -200,7 +200,6 @@ public class RingoApp {
                                     DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
                                     socket.send(p);
                                 }
-                                it.remove();
                             }
                         }
                         newData = false;
@@ -246,10 +245,12 @@ public class RingoApp {
                                 socket.send(p);
                             }
                         }
+                        System.out.println("Send RTT Transfer: " + rttTransfer);
                         if (rttTransfer) {
                             System.out.println("RTT Transfer start");
                             Iterator it = globalRTT.entrySet().iterator();
                             while (it.hasNext()) {
+                                System.out.println("Starting Send");
                                 Map.Entry pair = (Map.Entry)it.next();
                                 Node n = (Node)pair.getKey();
                                 NodeTime[] nt = (NodeTime[])pair.getValue();
@@ -267,14 +268,14 @@ public class RingoApp {
                                 System.out.println("Sending message: " + payload);
                                 // Send the payload to every ringo
                                 for (int j = 0; j < ringo.active.size(); j++) {
-                                    outToRingo = payload.getBytes();
+                                    sendData = payload.getBytes();
                                     Node neighbor = ringo.active.get(j);
                                     InetAddress sendIp = InetAddress.getByName(neighbor.addr);
                                     int sendPort = neighbor.port;
-                                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                                    DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
+                                    System.out.println("Send IP: " + sendIp.toString() + ", Port: " + sendPort);
                                     socket.send(p);
                                 }
-                                it.remove();
                             }
                         }
                     }
@@ -314,6 +315,7 @@ public class RingoApp {
                 newData = true;
             }
         }
+        System.out.println("Receive RTT Transfer: " + rttTransfer);
         if (rttTransfer) {
             System.out.println("Receiving message");
             String[] info = message.split("|");
@@ -359,8 +361,8 @@ public class RingoApp {
                     }
                 }
                 rttCalc = false;
-                rttTransfer = true;
                 globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
+                rttTransfer = true;
                 break;
             }
         }
