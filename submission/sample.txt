@@ -1,0 +1,47 @@
+Suppose we want to ring a three node token-ring network:
+
+1) Launch Ringo A
+
+>> java RingoApp S 13000 0 0 3
+Welcome to Ringo!
+#### Ringo commands ####
+1) send <filename>
+2) show-matrix
+3) show-ring
+4) offline <seconds>
+5) disconnect
+Ringo command:
+
+
+2) Launch Ringo B
+>> java RingoApp F 13001 localhost 13000 3
+Welcome to Ringo!
+#### Ringo commands ####
+1) send <filename>
+2) show-matrix
+3) show-ring
+4) offline <seconds>
+5) disconnect
+Ringo command:
+
+3) Launch Ringo C
+>> java RingoApp S 13002 localhost 13001 3
+Welcome to Ringo!
+#### Ringo commands ####
+1) send <filename>
+2) show-matrix
+3) show-ring
+4) offline <seconds>
+5) disconnect
+-------------------------------------------------------------------------------------
+ONCE ALL NODES ARE UP, YOU MAY RUN THE FOLLOWING COMMANDS
+
+Ringo command: show-ring
+#### Optimal ring ####
+(169.254.246.145,13002) <--> (169.254.246.145,13001) <--> (169.254.246.145,13000)
+Ringo command: show-matrix
+#### Global RTT Matrix ####
+Format: A = (A, RTT) | (B, RTT) | (C,RTT)
+(169.254.246.145,13002) = ((169.254.246.145,13002),0)|((169.254.246.145,13001),2)|((169.254.246.145,13000),0)
+Ringo command: disconnect
+>>
