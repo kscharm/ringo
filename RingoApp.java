@@ -15,10 +15,10 @@ public class RingoApp {
     public static byte[] inFromRingo  = new byte[2048];
 
     // Flags
-    boolean discovery = true;
-    boolean rttCalc = false;
-    boolean rttTransfer = false;
-    boolean newData = false;
+    volatile Boolean discovery = true;
+    volatile Boolean rttCalc = false;
+    volatile Boolean rttTransfer = false;
+    volatile Boolean newData = false;
 
     // Define threads
     Runnable thread1, thread2, thread3;
@@ -93,11 +93,11 @@ public class RingoApp {
         thread3 = new CheckThread();
         receiveThread = new Thread(thread1);
         sendThread = new Thread(thread2);
-       // checkThread = new Thread(thread3);
+        checkThread = new Thread(thread3);
 
         sendThread.start();
         receiveThread.start();
-       // checkThread.start();
+        checkThread.start();
 
 
         // TODO: Start exchanging RTT
@@ -200,7 +200,6 @@ public class RingoApp {
                                     DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
                                     socket.send(p);
                                 }
-                                it.remove();
                             }
                         }
                         newData = false;
@@ -209,7 +208,6 @@ public class RingoApp {
                     if (ringo.active.size() == numRingos) {
                         discovery = false;
                         rttCalc = true;
-                        check();
                         break;
                     }
                     // Check to see if we know all RTTs
@@ -247,7 +245,6 @@ public class RingoApp {
                             }
                         }
                         if (rttTransfer) {
-                            System.out.println("RTT Transfer start");
                             Iterator it = globalRTT.entrySet().iterator();
                             while (it.hasNext()) {
                                 Map.Entry pair = (Map.Entry)it.next();
@@ -267,14 +264,13 @@ public class RingoApp {
                                 System.out.println("Sending message: " + payload);
                                 // Send the payload to every ringo
                                 for (int j = 0; j < ringo.active.size(); j++) {
-                                    outToRingo = payload.getBytes();
+                                    sendData = payload.getBytes();
                                     Node neighbor = ringo.active.get(j);
                                     InetAddress sendIp = InetAddress.getByName(neighbor.addr);
                                     int sendPort = neighbor.port;
-                                    DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                                    DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
                                     socket.send(p);
                                 }
-                                it.remove();
                             }
                         }
                     }
@@ -290,7 +286,21 @@ public class RingoApp {
         }
 
         public void check() {
-
+            while (!Thread.currentThread().isInterrupted()) {
+                if (rttCalc) {
+                    System.out.println("Calculating RTT");
+                    for (int i = 0; i < ringo.active.size(); i++) {
+                        Node n = ringo.active.get(i);
+                        if (n.addr.equals(ipaddr) && n.port == port) {
+                            ringo.localRTT[i] = new NodeTime(n, 0);
+                        } else {
+                            ringo.localRTT[i] = new NodeTime(n, calcRTT(n.addr, n.port));
+                        }
+                    }
+                    globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
+                    rttCalc = false;
+                }
+            }
         }
     }
 
@@ -346,26 +356,6 @@ public class RingoApp {
         }
     }
 
-    public void check() {
-        while (true) {
-            if (rttCalc) {
-                System.out.println("Calculating RTT");
-                for (int i = 0; i < ringo.active.size(); i++) {
-                    Node n = ringo.active.get(i);
-                    if (n.addr.equals(ipaddr) && n.port == port) {
-                        ringo.localRTT[i] = new NodeTime(n, 0);
-                    } else {
-                        ringo.localRTT[i] = new NodeTime(n, calcRTT(n.addr, n.port));
-                    }
-                }
-                rttCalc = false;
-                rttTransfer = true;
-                globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
-                break;
-            }
-        }
-    }
-
     private static long calcRTT(String ip, int port) {
         try {
             InetAddress ipaddr = InetAddress.getByName(ip);
@@ -384,13 +374,6 @@ public class RingoApp {
             System.out.println("An exception has occurred: " + e);
             return Long.MAX_VALUE;
         }
-    }
-}
-
-class Timer {
-    long timer;
-    Timer() {
-        timer = System.currentTimeMillis();
     }
 }
 
