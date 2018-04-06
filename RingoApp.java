@@ -1,6 +1,10 @@
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Interactive token-ring networking application.
@@ -18,14 +22,18 @@ public class RingoApp {
     public static int sequenceNum = 0;
     public static String ipaddr = null;
 
+    public static BlockingQueue<Packet> packetQueue;
     // Flags
-    volatile Boolean discovery = true;
-    volatile Boolean rttCalc = false;
-    volatile Boolean rttTransfer = false;
+    static volatile boolean discovery = true;
+    static volatile boolean rttCalc = false;
+    static volatile boolean rttTransfer = false;
 
     // Define threads
-    Runnable thread1, thread2, thread3;
-    Thread receiveThread, sendThread, keepAliveThread;
+    //Runnable thread1, thread2, thread3;
+
+    private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
+    private static ExecutorService sendThread = Executors.newCachedThreadPool();
+    private static ExecutorService keepAliveThread = Executors.newSingleThreadExecutor();
 
     // Define global ringo object
     Ringo ringo = null;
@@ -88,16 +96,27 @@ public class RingoApp {
         // Add myself to the list of active ringos
         Node id = new Node(ipaddr, port);
         ringo.active.add(id);
-    
+
+        if (!pocHost.equals(0) && pocPort != 0) {
+            //System.out.println("sending to PoC");
+            Packet first = new Packet("1:" + id.toString(), id, new Node(pocHost.getHostAddress(), pocPort));
+            sendPacket(first);
+        }
+
+
         // Start threads
-        thread1 = new ReceiveThread();
-        thread2 = new SendThread();
-        thread3 = new KeepAliveThread();
-        receiveThread = new Thread(thread1);
-        sendThread = new Thread(thread2);
-        keepAliveThread = new Thread(thread3);
-        receiveThread.start();
-        sendThread.start();
+        packetQueue = new LinkedBlockingQueue<>();
+
+        receiveThread.submit(new ReceiveThread());
+
+        //thread1 = new ReceiveThread();
+        //thread2 = new SendThread();
+        //thread3 = new KeepAliveThread();
+        //receiveThread = new Thread(thread1);
+        //sendThread = new Thread(thread2);
+        //keepAliveThread = new Thread(thread3);
+        //receiveThread.start();
+        //sendThread.start();
         //keepAliveThread.start();
 
         // TODO: Find optimal ring
@@ -152,10 +171,13 @@ public class RingoApp {
         }
     }
 
+
+
     /**
      * Thread for receiving packets in a stream.
      */
     class ReceiveThread implements Runnable {
+
         public void run() {
             receive();
         }
@@ -170,9 +192,13 @@ public class RingoApp {
                     byte[] inFromRingo  = new byte[2048];
                     DatagramPacket receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
                     socket.receive(receivePacket);
+
+                    int port = receivePacket.getPort();
+                    String address = receivePacket.getAddress().getHostAddress();
+
                     // Check to see if the packet we have received is not empty
                     if (receivePacket.getLength() != inFromRingo.length) {
-                        receiveMessage(inFromRingo, receivePacket);
+                        receiveMessage(inFromRingo, address, port, receivePacket);
                     }
                 }
             } catch (Exception e) {
@@ -185,10 +211,22 @@ public class RingoApp {
             }
         }
     }
+
+    public void sendPacket(Packet p) {
+        sendThread.submit(new SendThread(p));
+    }
+
+
     /**
      * Thread for sending packets in a stream.
      */
     class SendThread implements Runnable {
+
+        Packet p;
+
+        public SendThread(Packet p) {
+            this.p = p;
+        }
         public void run() {
             send();
         }
@@ -197,6 +235,22 @@ public class RingoApp {
          * Currently supports peer discovery and RTT transfer.
          */
         public void send() {
+            String payload = p.getPayload();
+            Node dest = p.getDestination();
+
+            byte[] buffer = new byte[2048];
+            buffer = payload.getBytes();
+            try {
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, InetAddress.getByName(dest.getAddress()), dest.getPort());
+                socket.send(packet);
+            } catch (UnknownHostException e) {
+                System.out.println("Unknown Host: " + e.getMessage());
+            } catch (IOException f) {
+                System.out.println(f.getMessage());
+            }
+        }
+            /*
+        System.out.println("Sender RTT Value: " + rttTransfer);
         byte[] sendData = new byte[2048];
         // Loop through active to send all
             try {
@@ -213,6 +267,7 @@ public class RingoApp {
                     }
                 }
                 if (rttTransfer) {
+                    System.out.println("DEBUG");
                     synchronized(globalRTT) {
                         // Iterate through global RTT matrix and send each entry to all other Ringos
                         Iterator it = globalRTT.entrySet().iterator();
@@ -254,7 +309,10 @@ public class RingoApp {
                     System.out.println("Thread interrupted " + e.getMessage());
                 }
             }
+            System.out.println("Setting flags...");
+            setFlags();
         }
+        */
     }
 
     class KeepAliveThread implements Runnable {
@@ -276,9 +334,8 @@ public class RingoApp {
     /**
      * Parses a message and extracts important information, depending on the flag.
      */
-    private void receiveMessage(byte[] buffer, DatagramPacket receivePacket) throws IOException {
-        String message = new String(buffer, 0, receivePacket.getLength());
-        System.out.println("Received message: " + message);
+    private void receiveMessage(byte[] buffer, String address, int port, DatagramPacket dp) throws IOException {
+        String message = new String(buffer, 0, dp.getLength());
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
         String recAddr = null;
@@ -309,25 +366,21 @@ public class RingoApp {
             } catch (NumberFormatException e) {
                 System.out.println("Invalid response: " + e);
             }
-            Node tba = new Node(recAddr, recPort);
+            Node tba = new Node(address, port);
             if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
                 ringo.active.add(tba);
-                try {
-                    for (int i = 0; i < ringo.active.size(); i++) {
-                        Node n = ringo.active.get(i);
-                        InetAddress sendIp = InetAddress.getByName(n.getAddress());
-                        int sendPort = n.getPort();
-                        for (int j = 0; j < ringo.active.size(); j++) {
-                            if (sendPort != port) {
-                                String payload = header + ":" + ringo.active.get(j).toString();
-                                outToRingo = payload.getBytes();
-                                p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
-                                socket.send(p);
-                            }
-                        }
+                for (int j = 0; j < ringo.active.size(); j++) {
+                    Node n = ringo.active.get(j);
+                    int sendPort = n.getPort();
+                    if (sendPort != port) {
+                        String payload = header + ":" + ringo.active.get(j).toString();
+                        //outToRingo = payload.getBytes();
+                        Packet packet = new Packet(payload, null , tba);
+                        //p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
+                        //System.out.println("About to send...");
+                        sendPacket(packet);
+                        //packetQueue.put(packet);
                     }
-                } catch (IOException e) {
-                    System.out.println("An I/O error has occurred while sending " + e.getMessage());
                 }
             }
         }
@@ -366,6 +419,12 @@ public class RingoApp {
                 }
             } 
         }
+
+        setFlags();
+
+    }
+
+    public void setFlags() {
         // Check to see if we know everyone
         if (discovery && ringo.active.size() == numRingos) {
             System.out.println("Discovery complete");
@@ -488,6 +547,33 @@ public class RingoApp {
         }
     }
 }
+
+class Packet {
+
+    String payload;
+    Node source;
+    Node destination;
+
+    public Packet(String p, Node s, Node d) {
+        payload = p;
+        source = s;
+        destination = d;
+    }
+
+    public String getPayload() {
+        return payload;
+    }
+
+    public Node getSender() {
+        return source;
+    }
+
+    public Node getDestination() {
+        return destination;
+    }
+
+}
+
 
 
 /**
