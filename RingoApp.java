@@ -13,6 +13,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class RingoApp {
     // Initialize data structures
     public static Map<Node, NodeTime[]> globalRTT = Collections.synchronizedMap(new HashMap<Node, NodeTime[]>());
+    public static List<Node> opt = new LinkedList<Node>();
     public static DatagramSocket socket = null;
     public static InetAddress pocHost = null;
     public static int port = -1;
@@ -22,17 +23,11 @@ public class RingoApp {
     public static int sequenceNum = 0;
     public static String ipaddr = null;
 
-
-    public static String packetHeader = "1";
-
-    public static BlockingQueue<Packet> packetQueue;
     // Flags
     static volatile boolean discovery = true;
     static volatile boolean rttCalc = false;
     static volatile boolean rttTransfer = false;
-
-    // Define threads
-    //Runnable thread1, thread2, thread3;
+    static volatile boolean calcRing = false;
 
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
@@ -102,26 +97,12 @@ public class RingoApp {
         ringo.active.add(id);
 
         if (!pocHost.equals(0) && pocPort != 0) {
-            //System.out.println("sending to PoC");
-            Packet first = new Packet(packetHeader + ":" + id.toString(), id, new Node(pocHost.getHostAddress(), pocPort));
+            Packet first = new Packet("1:" + id.toString(), id, new Node(pocHost.getHostAddress(), pocPort));
             sendPacket(first);
         }
 
-
-        // Start threads
-        packetQueue = new LinkedBlockingQueue<>();
-
+        // Start receive thread
         receiveThread.submit(new ReceiveThread());
-
-        //thread1 = new ReceiveThread();
-        //thread2 = new SendThread();
-        //thread3 = new KeepAliveThread();
-        //receiveThread = new Thread(thread1);
-        //sendThread = new Thread(thread2);
-        //keepAliveThread = new Thread(thread3);
-        //receiveThread.start();
-        //sendThread.start();
-        //keepAliveThread.start();
 
         // TODO: Find optimal ring
         Scanner scan = new Scanner(System.in);
@@ -140,6 +121,9 @@ public class RingoApp {
                 // Send file
                 String filename = input.substring(input.indexOf(" ") + 1, input.length());
                 System.out.println("Sending file: " + filename);
+                sendFile(filename);
+                File f = new File(filename);
+                byte [] fileByte = new byte[(int)f.length()];
             } else if (input.equals("show-matrix")) {
                 if (ringo.active.size() == numRingos) {
                     System.out.println("#### Global RTT Matrix ####");
@@ -196,14 +180,7 @@ public class RingoApp {
                     byte[] inFromRingo  = new byte[2048];
                     DatagramPacket receivePacket = new DatagramPacket(inFromRingo, inFromRingo.length);
                     socket.receive(receivePacket);
-
-                    int port = receivePacket.getPort();
-                    String address = receivePacket.getAddress().getHostAddress();
-
-                    // Check to see if the packet we have received is not empty
-                    if (receivePacket.getLength() != inFromRingo.length) {
-                        receiveMessage(inFromRingo, address, port, receivePacket);
-                    }
+                    receiveMessage(inFromRingo, receivePacket);
                 }
             } catch (Exception e) {
                 if (e instanceof IOException) {
@@ -218,6 +195,10 @@ public class RingoApp {
 
     public void sendPacket(Packet p) {
         sendThread.submit(new SendThread(p));
+    }
+
+    public void sendFile(String fileName) {
+
     }
 
 
@@ -256,70 +237,6 @@ public class RingoApp {
                 System.out.println(f.getMessage());
             }
         }
-        /*
-        System.out.println("Sender RTT Value: " + rttTransfer);
-        byte[] sendData = new byte[2048];
-        // Loop through active to send all
-            try {
-                if (discovery) {
-                    if (!pocHost.toString().equals("0") && pocPort != 0) {
-                        for (int i = 0; i < ringo.active.size(); i++) {
-                            String s = ringo.active.get(i).toString();
-                            String header = "1:";
-                            String message = header + s;
-                            sendData = message.getBytes();
-                            DatagramPacket p = new DatagramPacket(sendData, sendData.length, pocHost, pocPort);
-                            socket.send(p);
-                        }
-                    }
-                }
-                if (rttTransfer) {
-                    System.out.println("DEBUG");
-                    synchronized(globalRTT) {
-                        // Iterate through global RTT matrix and send each entry to all other Ringos
-                        Iterator it = globalRTT.entrySet().iterator();
-                        while (it.hasNext()) {
-                            Map.Entry pair = (Map.Entry)it.next();
-                            Node n = (Node)pair.getKey();
-                            NodeTime[] nt = (NodeTime[])pair.getValue();
-                            String header = "2:";
-                            // Attach parent to packet
-                            String payload = header + n.toString() + "x";
-                            System.out.println("Length: " + nt.length);
-                            // Stringify all the local RTT entires
-                            for (int i = 0; i < nt.length; i++) {
-                                if (nt != null) {
-                                    if (i == nt.length - 1) {
-                                        payload += nt[i].toString();
-                                    } else {
-                                        payload += nt[i].toString() + "x";
-                                    }
-                                }
-                            }
-                            // Send the payload to every ringo
-                            sendData = payload.getBytes();
-                            for (int j = 0; j < ringo.active.size(); j++) {
-                                Node neighbor = ringo.active.get(j);
-                                InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
-                                int sendPort = neighbor.getPort();
-                                DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
-                                socket.send(p);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                if (e instanceof IOException) {
-                    System.out.println("An I/O error has occurred " + e.getMessage());
-                }
-                if (e instanceof InterruptedException) {
-                    System.out.println("Thread interrupted " + e.getMessage());
-                }
-            }
-            System.out.println("Setting flags...");
-            setFlags();
-        }
-        */
     }
 
     class KeepAliveThread implements Runnable {
@@ -341,7 +258,7 @@ public class RingoApp {
     /**
      * Parses a message and extracts important information, depending on the flag.
      */
-    private synchronized void receiveMessage(byte[] buffer, String address, int port, DatagramPacket dp) throws IOException {
+    private synchronized void receiveMessage(byte[] buffer, DatagramPacket dp) throws IOException {
         String message = new String(buffer, 0, dp.getLength());
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
@@ -366,7 +283,7 @@ public class RingoApp {
             String[] info = message.split(",");
         }
         // Header of 1 means peer discovery
-        if (packetHeader.equals("1")) {
+        if (header.equals("1")) {
             String[] info = message.split(",");
             try {
                 recAddr = info[0];
@@ -377,27 +294,26 @@ public class RingoApp {
             Node tba = new Node(recAddr, recPort);
             if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
                 ringo.active.add(tba);
-                for (int j = 0; j < ringo.active.size(); j++) {
-                    Node n = ringo.active.get(j);
-                    int sendPort = n.getPort();
-                    if (sendPort != port) {
-                        String payload = packetHeader + ":" + ringo.active.get(j).toString();
-                        //outToRingo = payload.getBytes();
-                        Packet packet = new Packet(payload, null , tba);
-                        //p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
-                        //System.out.println("About to send...");
-                        sendPacket(packet);
+                // Send each node in the active list to all neighbors
+                for (int i = 0; i < ringo.active.size(); i++) {
+                    Node curr = ringo.active.get(i);
+                    for (int j = 0; j < ringo.active.size(); j++) {
+                        if (i != j) {
+                            Node dest = ringo.active.get(j);
+                            String payload = header + ":" + curr.toString();
+                            Packet packet = new Packet(payload, curr, dest);
+                            sendPacket(packet);
+                        }
                     }
                 }
             }
         }
         // Header of 2 means RTT vector exchange
-        if (packetHeader.equals("2")) {
+        if (header.equals("2")) {
             String[] info = message.split("x");
             NodeTime[] ntArray = new NodeTime[numRingos];
             Node parent = null;
             for (int i = 0; i < info.length; i++) {
-                System.out.println("GlobalRTT entry: " + info[i]);
                 String[] entry = info[i].split(",");
                 try {
                     recAddr = entry[0];
@@ -418,42 +334,8 @@ public class RingoApp {
                 }
             }
             if (parent != null) {
-                System.out.println("Putting " + parent + " into globalRTT");
                 globalRTT.put(parent, ntArray);
-                // Send intial RTT vectors
-                Iterator it = globalRTT.entrySet().iterator();
-                while (it.hasNext()) {
-                    Map.Entry pair = (Map.Entry)it.next();
-                    Node n = (Node)pair.getKey();
-                    NodeTime[] nt = (NodeTime[])pair.getValue();
-                    // Attach parent to packet
-                    String payload = packetHeader +":"+ n.toString() + "x";
-                    // Stringify all the local RTT entires
-                    for (int i = 0; i < nt.length; i++) {
-                        if (nt != null) {
-                            if (i == nt.length - 1) {
-                                payload += nt[i].toString();
-                            } else {
-                                payload += nt[i].toString() + "x";
-                            }
-                        }
-                    }
-                    // Send the payload to every ringo
-                    for (int j = 0; j < ringo.active.size(); j++) {
-                        Node neighbor = ringo.active.get(j);
-                        try {
-                            InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
-                            int sendPort = neighbor.getPort();
-                            Packet pack = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
-                            System.out.println("Sending packet with payload: " + payload);
-                            if (sendPort != port) {
-                                sendPacket(pack);
-                            }
-                        } catch (UnknownHostException e) {
-                            System.out.println(e.getMessage());
-                        }
-                    }
-                }
+                sendRTT();
             }
         }
 
@@ -461,7 +343,7 @@ public class RingoApp {
 
     }
 
-    public void setFlags() {
+    private void setFlags() {
         // Check to see if we know everyone
         if (discovery && ringo.active.size() == numRingos) {
             System.out.println("Discovery complete");
@@ -474,13 +356,38 @@ public class RingoApp {
             System.out.println("Local RTT vector calculations complete");
             rttCalc = false;
             rttTransfer = true;
-            packetHeader = "2";
+            sendRTT();
         }
         // Check to see if we know all RTTs
         if (rttTransfer && getSize() == numRingos) {
             System.out.println("RTT exchange complete");
             rttTransfer = false;
+            calcRing = true;
+            calculateOptimalRing();
         }
+
+        if (calcRing && opt.size() == numRingos) {
+
+        }
+    }
+
+    private synchronized void calculateOptimalRing() {
+         // Send intial RTT vectors
+         Iterator it = globalRTT.entrySet().iterator();
+         while (it.hasNext()) {
+             Map.Entry pair = (Map.Entry)it.next();
+             Node n = (Node)pair.getKey();
+             NodeTime[] nt = (NodeTime[])pair.getValue();
+             long min = Long.MAX_VALUE;
+             Node curr = nt[0].getNode();
+            for (int i = 0; i < nt.length; i++) {
+                long time = nt[i].getRTT();
+                if (time < min) {
+                    min = time;
+                    curr = nt[i].getNode();
+                }
+            }  
+         }
     }
 
     /**
@@ -506,25 +413,57 @@ public class RingoApp {
         }
     }
 
+    private synchronized void sendRTT() {
+        // Send intial RTT vectors
+        Iterator it = globalRTT.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry pair = (Map.Entry)it.next();
+            Node n = (Node)pair.getKey();
+            NodeTime[] nt = (NodeTime[])pair.getValue();
+            // Attach parent to packet
+            String payload = "2:"+ n.toString() + "x";
+            // Stringify all the local RTT entires
+            for (int i = 0; i < nt.length; i++) {
+                if (nt != null) {
+                    if (i == nt.length - 1) {
+                        payload += nt[i].toString();
+                    } else {
+                        payload += nt[i].toString() + "x";
+                    }
+                }
+            }
+            // Send the payload to every ringo
+            for (int j = 0; j < ringo.active.size(); j++) {
+                Node neighbor = ringo.active.get(j);
+                try {
+                    InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
+                    int sendPort = neighbor.getPort();
+                    Packet pack = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
+                    if (sendPort != port) {
+                        sendPacket(pack);
+                    }
+                } catch (UnknownHostException e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
+    }
+
     /**
      * Checks to see if we are in the calculate RTT state. If so,
      * add a new entry into the globalRTT matrix.
      */
-    public void calcRTTvectors() {
-        synchronized(ringo.active) {
-            for (int i = 0; i < ringo.active.size(); i++) {
-                Node n = ringo.active.get(i);
-                if (n.getAddress().equals(ipaddr) && n.getPort() == port) {
-                    ringo.localRTT[i] = new NodeTime(n, 0);
-                } else {
-                    ringo.localRTT[i] = new NodeTime(n, calcRTT(n.getAddress(), n.getPort()));
-                }
-                rttLength++;
+    public synchronized void calcRTTvectors() {
+        for (int i = 0; i < ringo.active.size(); i++) {
+            Node n = ringo.active.get(i);
+            if (n.getAddress().equals(ipaddr) && n.getPort() == port) {
+                ringo.localRTT[i] = new NodeTime(n, 0);
+            } else {
+                ringo.localRTT[i] = new NodeTime(n, calcRTT(n.getAddress(), n.getPort()));
             }
-            synchronized(globalRTT) {
-                globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
-            }
+            rttLength++;
         }
+        globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
     }
 
     /**
@@ -555,10 +494,8 @@ public class RingoApp {
     /**
      * Returns the size of the global RTT matrix.
      */
-    public int getSize() {
-        synchronized(this) {
-            return globalRTT.size();
-        }
+    private synchronized int getSize() {
+        return globalRTT.size();
     }
 
     class SendAlivePackets extends TimerTask {
