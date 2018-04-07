@@ -417,10 +417,10 @@ public class RingoApp {
                     System.out.println("Invalid response: " + e);
                 }
             }
-            if (parent != null && !globalRTT.containsKey(parent)) {
+            if (parent != null) {
                 System.out.println("Putting " + parent + " into globalRTT");
                 globalRTT.put(parent, ntArray);
-                 //send intial RTT vectors
+                // Send intial RTT vectors
                 Iterator it = globalRTT.entrySet().iterator();
                 while (it.hasNext()) {
                     Map.Entry pair = (Map.Entry)it.next();
@@ -445,7 +445,10 @@ public class RingoApp {
                             InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                             int sendPort = neighbor.getPort();
                             Packet pack = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
-                            sendPacket(pack);
+                            System.out.println("Sending packet with payload: " + payload);
+                            if (sendPort != port) {
+                                sendPacket(pack);
+                            }
                         } catch (UnknownHostException e) {
                             System.out.println(e.getMessage());
                         }
