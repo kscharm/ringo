@@ -134,11 +134,11 @@ public class RingoApp {
             } else if (input.equals("show-ring")) {
                 // Show optimal ring formation
                 System.out.println("#### Optimal ring ####");
-                for (int i = 0; i < ringo.active.size(); i++) {
-                    if (i == ringo.active.size() - 1) {
-                        System.out.print(ringo.active.toArray()[i].toString() + "\n");
+                for (int i = 0; i < opt.size(); i++) {
+                    if (i == opt.size() - 1) {
+                        System.out.print(opt.toArray()[i].toString() + "\n");
                     } else {
-                        System.out.print(ringo.active.toArray()[i].toString() + " <--> ");
+                        System.out.print(opt.toArray()[i].toString() + " <--> ");
                     }
                 }
             } else if (input.indexOf("offline") != -1) {
@@ -363,7 +363,9 @@ public class RingoApp {
             System.out.println("RTT exchange complete");
             rttTransfer = false;
             calcRing = true;
-            calculateOptimalRing();
+            Node first = (Node)globalRTT.keySet().toArray()[0];
+            opt.add(first);
+            calculateOptimalRing(first);
         }
 
         if (calcRing && opt.size() == numRingos) {
@@ -371,23 +373,56 @@ public class RingoApp {
         }
     }
 
+    /*
     private synchronized void calculateOptimalRing() {
          // Send intial RTT vectors
          Iterator it = globalRTT.entrySet().iterator();
-         while (it.hasNext()) {
+         int index = 0;
+         while (index < 5) {
              Map.Entry pair = (Map.Entry)it.next();
              Node n = (Node)pair.getKey();
+             if (index == 0) {
+                 opt.add(n);
+
+             }
              NodeTime[] nt = (NodeTime[])pair.getValue();
              long min = Long.MAX_VALUE;
-             Node curr = nt[0].getNode();
-            for (int i = 0; i < nt.length; i++) {
+
+             for (int i = 0; i < nt.length; i++) {
                 long time = nt[i].getRTT();
-                if (time < min) {
+                if (time < min && time != 0) {
                     min = time;
                     curr = nt[i].getNode();
                 }
-            }  
+             }
+             opt.add(curr);
          }
+    }
+    */
+
+    private synchronized void calculateOptimalRing(Node key) {
+        if (opt.size() == numRingos) {
+            System.out.println("Optimal Ring = ");
+            for (int i = 0; i < opt.size(); i++) {
+                System.out.print(opt.get(i).toString());
+            }
+            return;
+        }
+
+        NodeTime[] nt = globalRTT.get(key);
+        Node curr = nt[0].getNode();
+
+        for (int i = 1; i < nt.length; i++) {
+            long min = Long.MAX_VALUE;
+            long time = nt[i].getRTT();
+
+            if (time < min && !opt.contains(nt[i].getNode())) {
+                min = time;
+                curr = nt[i].getNode();
+            }
+        }
+        opt.add(curr);
+        calculateOptimalRing(curr);
     }
 
     /**
