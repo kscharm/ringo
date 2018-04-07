@@ -34,6 +34,7 @@ public class RingoApp {
     // Define threads
     //Runnable thread1, thread2, thread3;
 
+    // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
     private static ExecutorService sendThread = Executors.newCachedThreadPool();
     private static ExecutorService keepAliveThread = Executors.newSingleThreadExecutor();
@@ -240,11 +241,14 @@ public class RingoApp {
         public void send() {
             String payload = p.getPayload();
             Node dest = p.getDestination();
-
+            String destAddress = dest.getAddress();
+            if (destAddress.indexOf("/") != -1) {
+                destAddress = destAddress.substring(destAddress.indexOf("/") + 1);
+            }
             byte[] buffer = new byte[2048];
             buffer = payload.getBytes();
             try {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, InetAddress.getByName(dest.getAddress()), dest.getPort());
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, InetAddress.getByName(destAddress), dest.getPort());
                 socket.send(packet);
             } catch (UnknownHostException e) {
                 System.out.println("Unknown Host: " + e.getMessage());
@@ -252,7 +256,7 @@ public class RingoApp {
                 System.out.println(f.getMessage());
             }
         }
-            /*
+        /*
         System.out.println("Sender RTT Value: " + rttTransfer);
         byte[] sendData = new byte[2048];
         // Loop through active to send all
@@ -337,7 +341,7 @@ public class RingoApp {
     /**
      * Parses a message and extracts important information, depending on the flag.
      */
-    private void receiveMessage(byte[] buffer, String address, int port, DatagramPacket dp) throws IOException {
+    private synchronized void receiveMessage(byte[] buffer, String address, int port, DatagramPacket dp) throws IOException {
         String message = new String(buffer, 0, dp.getLength());
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
@@ -348,6 +352,7 @@ public class RingoApp {
         message = message.substring(headerIndex + 1);
         byte[] outToRingo = new byte[2048];
         DatagramPacket p = null;
+        System.out.println("Got message: " + message);
         /*
         // TODO: Send ACK back to source
         String ackString = "ACK:" + sequenceNum;
@@ -382,7 +387,6 @@ public class RingoApp {
                         //p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
                         //System.out.println("About to send...");
                         sendPacket(packet);
-                        //packetQueue.put(packet);
                     }
                 }
             }
@@ -400,10 +404,8 @@ public class RingoApp {
                     recPort = Integer.parseInt(entry[1]);
                     Node n = new Node(recAddr, recPort);
                     if (i == 0) {
-                        synchronized(globalRTT) {
-                            if (globalRTT.containsKey(n)) {
-                                break;
-                            }
+                        if (globalRTT.containsKey(n)) {
+                            break;
                         }
                         parent = n;
                     } else {
@@ -415,12 +417,41 @@ public class RingoApp {
                     System.out.println("Invalid response: " + e);
                 }
             }
-            synchronized(globalRTT) {
-                if (!globalRTT.containsKey(parent)) {
-                    System.out.println("Putting " + parent + " into globalRTT");
-                    globalRTT.put(parent, ntArray);
+            if (parent != null && !globalRTT.containsKey(parent)) {
+                System.out.println("Putting " + parent + " into globalRTT");
+                globalRTT.put(parent, ntArray);
+                 //send intial RTT vectors
+                Iterator it = globalRTT.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry pair = (Map.Entry)it.next();
+                    Node n = (Node)pair.getKey();
+                    NodeTime[] nt = (NodeTime[])pair.getValue();
+                    // Attach parent to packet
+                    String payload = packetHeader +":"+ n.toString() + "x";
+                    // Stringify all the local RTT entires
+                    for (int i = 0; i < nt.length; i++) {
+                        if (nt != null) {
+                            if (i == nt.length - 1) {
+                                payload += nt[i].toString();
+                            } else {
+                                payload += nt[i].toString() + "x";
+                            }
+                        }
+                    }
+                    // Send the payload to every ringo
+                    for (int j = 0; j < ringo.active.size(); j++) {
+                        Node neighbor = ringo.active.get(j);
+                        try {
+                            InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
+                            int sendPort = neighbor.getPort();
+                            Packet pack = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
+                            sendPacket(pack);
+                        } catch (UnknownHostException e) {
+                            System.out.println(e.getMessage());
+                        }
+                    }
                 }
-            } 
+            }
         }
 
         setFlags();
@@ -441,41 +472,6 @@ public class RingoApp {
             rttCalc = false;
             rttTransfer = true;
             packetHeader = "2";
-
-            //send intial RTT vectors
-            Iterator it = globalRTT.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry pair = (Map.Entry)it.next();
-                Node n = (Node)pair.getKey();
-                NodeTime[] nt = (NodeTime[])pair.getValue();
-                // Attach parent to packet
-                String payload = packetHeader +":"+ n.toString() + "x";
-                System.out.println("Length: " + nt.length);
-                // Stringify all the local RTT entires
-                for (int i = 0; i < nt.length; i++) {
-                    if (nt != null) {
-                        if (i == nt.length - 1) {
-                            payload += nt[i].toString();
-                        } else {
-                            payload += nt[i].toString() + "x";
-                        }
-                    }
-                }
-                // Send the payload to every ringo
-                byte[] sendData = payload.getBytes();
-                for (int j = 0; j < ringo.active.size(); j++) {
-                    Node neighbor = ringo.active.get(j);
-                    try {
-                        InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
-                        int sendPort = neighbor.getPort();
-                        //DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
-                        Packet p = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
-                        sendPacket(p);
-                    } catch (UnknownHostException e) {
-                        System.out.println(e.getMessage());
-                    }
-                }
-                }
         }
         // Check to see if we know all RTTs
         if (rttTransfer && getSize() == numRingos) {
