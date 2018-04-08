@@ -16,6 +16,7 @@ public class RingoApp {
     public static List<Node> opt = new LinkedList<Node>();
     public static DatagramSocket socket = null;
     public static InetAddress pocHost = null;
+    public static Node id = null; 
     public static int port = -1;
     public static int pocPort = -1;
     public static int numRingos = -1;
@@ -93,7 +94,7 @@ public class RingoApp {
         }
 
         // Add myself to the list of active ringos
-        Node id = new Node(ipaddr, port);
+        id = new Node(ipaddr, port);
         ringo.active.add(id);
 
         if (!pocHost.equals(0) && pocPort != 0) {
@@ -119,17 +120,19 @@ public class RingoApp {
             // TODO: Implement send
             if (input.indexOf("send") != -1) {
                 // Send file
-                String filename = input.substring(input.indexOf(" ") + 1, input.length());
-                System.out.println("Sending file: " + filename);
-                sendFile(filename);
-                File f = new File(filename);
-                byte [] fileByte = new byte[(int)f.length()];
+                if (!flag.equals("S")) {
+                    System.out.println("Can only send files from a Sender Ringo.");
+                } else {
+                    String filename = input.substring(input.indexOf(" ") + 1, input.length());
+                    System.out.println("Sending file: " + filename);
+                    sendFile(filename);
+                }
             } else if (input.equals("show-matrix")) {
                 if (ringo.active.size() == numRingos) {
                     System.out.println("#### Global RTT Matrix ####");
                     printMap(globalRTT);
                 } else {
-                    System.out.println("Not all ringos have been discovered");
+                    System.out.println("Not all ringos have been discovered.");
                 }
             } else if (input.equals("show-ring")) {
                 // Show optimal ring formation
@@ -198,7 +201,48 @@ public class RingoApp {
     }
 
     public void sendFile(String fileName) {
+        File f = new File(fileName);
+        byte [] fileByte = new byte[(int)f.length()];
+        Node sendNode = null;
+        for (int i = 0; i < opt.size(); i++) {
+            Node curr = opt.get(i);
+            if (id.equals(curr)) {
+                // If we are at the first node, wrap around and check the last node with the next node
+                if (i == 0) {
+                    if (isGreaterCost(opt.get(opt.size() - 1), opt.get(i + 1))) {
+                        sendNode = opt.get(i + 1);
+                    } else {
+                        sendNode = opt.get(opt.size() - 1);
+                    }
+                // If we are at the last node, wrap around and check the previous node with the first node
+                } else if (i == opt.size() - 1) {
+                    if (isGreaterCost(opt.get(i - 1), opt.get(0))) {
+                        sendNode = opt.get(0); 
+                    } else {
+                        sendNode = opt.get(i - 1);
+                    }
+                // Otherwise, compeare the previous node with the next node
+                } else {
+                    if (isGreaterCost(opt.get(i - 1), opt.get(i + 1))) {
+                        sendNode = opt.get(i + 1);
+                    } else {
+                        sendNode = opt.get(i - 1);
+                    }
+                }
+            }
+        }
+        System.out.println("Node to send to: " + sendNode.toString());
+    } 
 
+    /**
+     * Returns true is the cost from me to node 1 is greater than the cost
+     * from me to node 2.
+     */
+    public Boolean isGreaterCost(Node n1, Node n2) {
+        if (getCost(id, n1) > getCost(id, n2)) {
+            return true;
+        }
+        return false;
     }
 
 
@@ -269,7 +313,7 @@ public class RingoApp {
         message = message.substring(headerIndex + 1);
         byte[] outToRingo = new byte[2048];
         DatagramPacket p = null;
-        System.out.println("Got message: " + message);
+        //System.out.println("Got message: " + message);
         /*
         // TODO: Send ACK back to source
         String ackString = "ACK:" + sequenceNum;
@@ -338,9 +382,7 @@ public class RingoApp {
                 sendRTT();
             }
         }
-
         setFlags();
-
     }
 
     private void setFlags() {
@@ -369,43 +411,37 @@ public class RingoApp {
         }
 
         if (calcRing && opt.size() == numRingos) {
-
+            System.out.println("Optimal ring calculation complete");
+            calcRing = false;
         }
     }
 
-    /*
-    private synchronized void calculateOptimalRing() {
-         // Send intial RTT vectors
-         Iterator it = globalRTT.entrySet().iterator();
-         int index = 0;
-         while (index < 5) {
-             Map.Entry pair = (Map.Entry)it.next();
-             Node n = (Node)pair.getKey();
-             if (index == 0) {
-                 opt.add(n);
-
-             }
-             NodeTime[] nt = (NodeTime[])pair.getValue();
-             long min = Long.MAX_VALUE;
-
-             for (int i = 0; i < nt.length; i++) {
-                long time = nt[i].getRTT();
-                if (time < min && time != 0) {
-                    min = time;
-                    curr = nt[i].getNode();
-                }
-             }
-             opt.add(curr);
-         }
+    private synchronized long getCost(Node key, Node dest) {
+        NodeTime[] costs = globalRTT.get(key);
+        for (int i = 0; i < costs.length; i++) {
+            Node curr = costs[i].getNode();
+            long time = costs[i].getRTT();
+            if (dest.equals(curr)) {
+                return time;
+            }
+        }
+        return -1;
     }
-    */
 
+    /**
+     * Calculates the optimal ring formation by performing a greedy search algorithm
+     * on the global RTT matrix. Starts with the first key in the global RTT matrix and
+     * searches it's local RTT vector for the smallest RTT. It adds this node to the ring
+     * and then looks at that node's local RTT vector to find the smallest. The algorithm
+     * terminates when the ring has been calculated.
+     */
     private synchronized void calculateOptimalRing(Node key) {
         if (opt.size() == numRingos) {
-            System.out.println("Optimal Ring = ");
+            /*
             for (int i = 0; i < opt.size(); i++) {
                 System.out.print(opt.get(i).toString());
             }
+            */
             return;
         }
 
@@ -423,8 +459,6 @@ public class RingoApp {
         }
         opt.add(curr);
         calculateOptimalRing(curr);
-
-        //bleah
     }
 
     /**
@@ -450,6 +484,9 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Sends this node's global RTT matrix to all other known Ringos.
+     */
     private synchronized void sendRTT() {
         // Send intial RTT vectors
         Iterator it = globalRTT.entrySet().iterator();
@@ -475,7 +512,7 @@ public class RingoApp {
                 try {
                     InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                     int sendPort = neighbor.getPort();
-                    Packet pack = new Packet(payload, new Node(ipaddr, port), new Node(sendIp.toString(), sendPort));
+                    Packet pack = new Packet(payload, id, new Node(sendIp.toString(), sendPort));
                     if (sendPort != port) {
                         sendPacket(pack);
                     }
@@ -500,7 +537,7 @@ public class RingoApp {
             }
             rttLength++;
         }
-        globalRTT.put(new Node(ipaddr, port), ringo.localRTT);
+        globalRTT.put(id, ringo.localRTT);
     }
 
     /**
@@ -528,6 +565,7 @@ public class RingoApp {
         }
         
     }
+
     /**
      * Returns the size of the global RTT matrix.
      */
@@ -539,7 +577,7 @@ public class RingoApp {
         public void run() {
             // Send the payload to every ringo
             byte[] sendData = new byte[2048];
-            String payload = "Alive:" + new Node(ipaddr, port).toString();
+            String payload = "Alive:" + id.toString();
             sendData = payload.getBytes();
             try {
                 for (int j = 0; j < ringo.active.size(); j++) {
@@ -560,6 +598,10 @@ public class RingoApp {
     }
 }
 
+/**
+ * Packet class that represents a packet with a source, destination, and payload.
+ * Used to provide reliable file transfer.
+ */
 class Packet {
 
     String payload;
@@ -582,6 +624,24 @@ class Packet {
 
     public Node getDestination() {
         return destination;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null) {
+            return false;
+        }
+        if (getClass() != obj.getClass()) {
+            return false;
+        }
+        Packet a = (Packet) obj;
+        if ((!this.source.equals(a.source)) || !this.destination.equals(a.destination) || !this.payload.equals(a.payload)) {
+            return false;
+        }
+        return true;
     }
 
 }
