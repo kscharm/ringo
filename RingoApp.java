@@ -13,7 +13,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class RingoApp {
     // Initialize data structures
     public static Map<Node, NodeTime[]> globalRTT = Collections.synchronizedMap(new HashMap<Node, NodeTime[]>());
-    public static List<Node> opt = new LinkedList<Node>();
+    public static List<Node> opt = new LinkedList<>();
+    public static List<Node> currentPath = new LinkedList<>();
     public static DatagramSocket socket = null;
     public static InetAddress pocHost = null;
     public static Node id = null; 
@@ -23,6 +24,7 @@ public class RingoApp {
     public static int rttLength = 0;
     public static int sequenceNum = 0;
     public static String ipaddr = null;
+    public static String flag = null;
 
     // Flags
     static volatile boolean discovery = true;
@@ -51,8 +53,7 @@ public class RingoApp {
             System.out.println("Insufficient arguments");
             System.exit(0);
         }
-        System.out.println("Welcome to Ringo!");
-        String flag = null;
+        System.out.println("Welcome to Ringo!");;
         try {
             flag = args[0];
             pocHost = InetAddress.getByName(args[2]);
@@ -94,7 +95,7 @@ public class RingoApp {
         }
 
         // Add myself to the list of active ringos
-        id = new Node(ipaddr, port);
+        id = new Node(ipaddr, port, flag);
         ringo.active.add(id);
 
         if (!pocHost.equals(0) && pocPort != 0) {
@@ -201,10 +202,115 @@ public class RingoApp {
     }
 
     public void sendFile(String fileName) {
+       List<Node> forwardPath = new LinkedList<>();
+       List<Node> reversePath = new LinkedList<>();
         File f = new File(fileName);
         byte [] fileByte = new byte[(int)f.length()];
-        Node sendNode = null;
+        int sendIndex = -1;
+
+        // Find the index in the optimal ring of the Sender Ringo
         for (int i = 0; i < opt.size(); i++) {
+            if (opt.get(i).getFlag().equals("S")) {
+                sendIndex = i;
+            }
+        }
+
+        forwardPath.add(opt.get(sendIndex));
+        reversePath.add(opt.get(sendIndex));
+
+        // Sets the start index based on position of Sender Ringo in optimal ring
+        int start = -1;
+        if (sendIndex == opt.size() -1) {
+            start = 0;
+        } else {
+            start = sendIndex + 1;
+        }
+
+        // Calculating the cost of the forward direction in the optimal ring
+        int forwardCost = 0;
+        Node prev = opt.get(sendIndex);
+        for (int i = 0; i < opt.size() - 1; i++) {
+            Node curr = opt.get(start);
+            forwardCost += getCost(prev ,curr);
+            prev = curr;
+            if (start == opt.size() - 1) {
+                start = 0;
+            } else {
+                start++;
+            }
+
+            forwardPath.add(curr);
+            if (curr.getFlag().equals("R")) {
+                break;
+            }
+        }
+
+
+        if (sendIndex == 0) {
+            start = opt.size() - 1;
+        } else {
+            start = sendIndex - 1;
+        }
+        // Calculating the cost of the reverse direction in the optimal ring
+        int reverseCost = 0;
+        prev = opt.get(sendIndex);
+        for (int i = 0; i < opt.size() - 1; i++) {
+            Node curr = opt.get(start);
+            reverseCost += getCost(prev ,curr);
+            prev = curr;
+            if (start == 0) {
+                start = opt.size() - 1;
+            } else {
+                start--;
+            }
+
+            reversePath.add(curr);
+            if (curr.getFlag().equals("R")) {
+                break;
+            }
+        }
+
+        Node next = null;
+        boolean isForward = true;
+        if (forwardCost < reverseCost) {
+            if (sendIndex != opt.size() - 1) {
+                next = opt.get(sendIndex + 1);
+            } else {
+                next = opt.get(0);
+            }
+        } else {
+            isForward = false;
+            if (sendIndex != 0) {
+                next = opt.get(sendIndex - 1);
+            } else {
+                next = opt.get(opt.size() - 1);
+            }
+        }
+
+        String payload = "3:";
+        if (isForward){
+            for (int i = 0; i < forwardPath.size(); i++) {
+                if (i != forwardPath.size() - 1) {
+                    payload += forwardPath.get(i).toString() + "x";
+                } else {
+                    payload += forwardPath.get(i).toString();
+                }
+            }
+        } else {
+            for (int i = 0; i < reversePath.size(); i++) {
+                if (i != reversePath.size() - 1) {
+                    payload += reversePath.get(i).toString() + "x";
+                } else {
+                    payload += reversePath.get(i).toString();
+                }
+            }
+        }
+
+        Packet p = new Packet(payload, id , next);
+        sendPacket(p);
+
+
+            /*
             Node curr = opt.get(i);
             if (id.equals(curr)) {
                 // If we are at the first node, wrap around and check the last node with the next node
@@ -230,9 +336,9 @@ public class RingoApp {
                     }
                 }
             }
-        }
-        System.out.println("Node to send to: " + sendNode.toString());
-    } 
+            */
+        //System.out.println("Node to send to: " + sendNode.toString());
+    }
 
     /**
      * Returns true is the cost from me to node 1 is greater than the cost
@@ -304,6 +410,7 @@ public class RingoApp {
      */
     private synchronized void receiveMessage(byte[] buffer, DatagramPacket dp) throws IOException {
         String message = new String(buffer, 0, dp.getLength());
+        String oldmsg = message;
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
         String recAddr = null;
@@ -313,6 +420,7 @@ public class RingoApp {
         message = message.substring(headerIndex + 1);
         byte[] outToRingo = new byte[2048];
         DatagramPacket p = null;
+        String f = null;
         //System.out.println("Got message: " + message);
         /*
         // TODO: Send ACK back to source
@@ -332,10 +440,11 @@ public class RingoApp {
             try {
                 recAddr = info[0];
                 recPort = Integer.parseInt(info[1]);
+                f = info[2];
             } catch (NumberFormatException e) {
                 System.out.println("Invalid response: " + e);
             }
-            Node tba = new Node(recAddr, recPort);
+            Node tba = new Node(recAddr, recPort, f);
             if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
                 ringo.active.add(tba);
                 // Send each node in the active list to all neighbors
@@ -357,19 +466,21 @@ public class RingoApp {
             String[] info = message.split("x");
             NodeTime[] ntArray = new NodeTime[numRingos];
             Node parent = null;
+            String f1 = null;
             for (int i = 0; i < info.length; i++) {
                 String[] entry = info[i].split(",");
                 try {
                     recAddr = entry[0];
                     recPort = Integer.parseInt(entry[1]);
-                    Node n = new Node(recAddr, recPort);
+                    f1 = entry[2];
+                    Node n = new Node(recAddr, recPort, f1);
                     if (i == 0) {
                         if (globalRTT.containsKey(n)) {
                             break;
                         }
                         parent = n;
                     } else {
-                        int time = Integer.parseInt(entry[2]);
+                        int time = Integer.parseInt(entry[3]);
                         NodeTime nt = new NodeTime(n, time);
                         ntArray[i - 1] = nt;
                     }
@@ -380,6 +491,41 @@ public class RingoApp {
             if (parent != null) {
                 globalRTT.put(parent, ntArray);
                 sendRTT();
+            }
+        }
+
+        if (header.equals("3")) {
+            String[] info = message.split("x");
+            List<Node> temp = new LinkedList<>();
+            try {
+                for (int i = 0; i < info.length; i++) {
+                    String[] node = info[i].split(",");
+                    String ip = node[0];
+                    int port = Integer.parseInt(node[1]);
+                    String f2 = node[2];
+
+                    Node n = new Node(ip, port, f2);
+                    temp.add(n);
+                }
+            } catch (NumberFormatException e) {
+                System.out.println(e.getMessage());
+            }
+
+            currentPath = temp;
+            for (Node n : currentPath) {
+                System.out.println(n.toString());
+            }
+
+            if (flag.equals("F")) {
+                int forwarderIndex = -1;
+                for (int i = 0; i < currentPath.size(); i++){
+                    if (currentPath.get(i).getFlag().equals("F")) {
+                        forwarderIndex = i;
+                    }
+
+                }
+                Packet z = new Packet(oldmsg, id, currentPath.get(forwarderIndex + 1));
+                //ringo.forward(z);
             }
         }
         setFlags();
@@ -512,7 +658,8 @@ public class RingoApp {
                 try {
                     InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                     int sendPort = neighbor.getPort();
-                    Packet pack = new Packet(payload, id, new Node(sendIp.toString(), sendPort));
+                    String f = neighbor.getFlag();
+                    Packet pack = new Packet(payload, id, new Node(sendIp.toString(), sendPort, f));
                     if (sendPort != port) {
                         sendPacket(pack);
                     }
@@ -654,9 +801,18 @@ class Packet {
 class Node {
     String addr;
     int port;
+    String flag;
+
     public Node(String addr, int port) {
         this.addr = addr;
         this.port = port;
+        this.flag = null;
+    }
+
+    public Node (String addr, int port, String f) {
+        this.addr = addr;
+        this.port = port;
+        this.flag = f;
     }
 
     public String getAddress() {
@@ -667,9 +823,19 @@ class Node {
         return port;
     }
 
+    public String getFlag() {
+        return flag;
+    }
+
     @Override
     public String toString() {
-        return "(" + addr + "," + port + ")";
+        String to = null;
+        if (flag != (null) && !flag.isEmpty()) {
+            to = "(" + addr + "," + port + "," + flag + ")";
+        } else {
+            to = "(" + addr + "," + port + ")";
+        }
+        return to;
     }
 
     @Override

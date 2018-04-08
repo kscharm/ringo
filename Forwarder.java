@@ -11,7 +11,7 @@ public class Forwarder extends Ringo {
         this.localRTT = new NodeTime[numRingos];
     }
 
-    public void forward(DatagramPacket p) {
+    public void forward(Packet p) {
         
     }
 }
