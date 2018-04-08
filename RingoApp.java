@@ -423,6 +423,8 @@ public class RingoApp {
         }
         opt.add(curr);
         calculateOptimalRing(curr);
+
+        //bleah
     }
 
     /**
