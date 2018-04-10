@@ -33,6 +33,7 @@ public class RingoApp {
     static volatile boolean rttTransfer = false;
     static volatile boolean calcRing = false;
     static volatile boolean pathTransfer = false;
+    static volatile boolean canSend = true;
 
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
@@ -86,12 +87,6 @@ public class RingoApp {
             // Create the corresponding ringo
             if (flag.equals("R")) {
                 ringo = new Receiver(port, pocHost, pocPort, numRingos);
-                try {
-                    file = new File(System.getProperty("user.dir") + "\\output.txt");
-                    out = new FileOutputStream(file);
-                } catch (FileNotFoundException e) {
-                    System.out.println("File error: " + e.getMessage());
-                }
             } else if (flag.equals("S")) {
                 ringo = new Sender(port, pocHost, pocPort, numRingos);
             } else if (flag.equals("F")) {
@@ -126,12 +121,17 @@ public class RingoApp {
         while(true) {
             System.out.print("Ringo command: ");
             String input = scan.nextLine();
-            // TODO: Implement send
             if (input.indexOf("send") != -1) {
                 // Send file
                 if (!flag.equals("S")) {
                     System.out.println("Can only send files from a Sender Ringo.");
                 } else {
+                    try {
+                        file = new File(System.getProperty("user.dir") + "\\output.txt");
+                        out = new FileOutputStream(file);
+                    } catch (FileNotFoundException e) {
+                        System.out.println("File error: " + e.getMessage());
+                    }
                     System.out.println(input);
                     String filename = input.substring(input.indexOf("d") + 2, input.length());
                     sourceFilePath +=  "\\" + filename;
@@ -406,14 +406,6 @@ public class RingoApp {
         DatagramPacket p = null;
         String f = null;
         //System.out.println("Got message: " + message);
-        /*
-        // TODO: Send ACK back to source
-        String ackString = "ACK:" + sequenceNum;
-        outToRingo = ackString.getBytes();
-        DatagramPacket p = new DatagramPacket(outToRingo, outToRingo.length, sendIp, sendPort);
-        socket.send(p);
-        sequenceNum++;
-        */
         if (header.equals("Alive")) {
             // TODO: determine if any Ringos went down
             String[] info = message.split(",");
@@ -497,6 +489,7 @@ public class RingoApp {
             }
 
             currentPath = temp;
+            System.out.println("Current path:");
             for (Node n : currentPath) {
                 System.out.println(n.toString());
             }
@@ -525,6 +518,7 @@ public class RingoApp {
                 for (int i = 0; i < currentPath.size(); i++){
                     if (currentPath.get(i).getFlag().equals("F")) {
                         forwarderIndex = i;
+                        break;
                     }
                 }
                 Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex + 1));
@@ -534,13 +528,55 @@ public class RingoApp {
             if (flag.equals("R")) {
                 oldMessage = oldMessage.substring(headerIndex + 1);
                 byte[] messageBytes = oldMessage.getBytes();
-                System.out.println("\n Packet length: " + (dp.getLength() - 2));
+                int length = dp.getLength() - 2; // Subtract 2 for the header
+                System.out.println("Packet length: " + length);
                 out.write(messageBytes, 0, messageBytes.length);
                 System.out.println("Packet written to file");
                 out.flush();
+                if (oldMessage.equals("x")) {
+                    System.out.println("Closing file output stream");
+                    out.close();
+                }
+                sendAck();
+            }
+        }
+        if (header.equals("ACK")) {
+            if (flag.equals("F")) {
+                int forwarderIndex = -1;
+                for (int i = 0; i < currentPath.size(); i++){
+                    if (currentPath.get(i).getFlag().equals("F")) {
+                        forwarderIndex = i;
+                        break;
+                    }
+                }
+                Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
+                forward(nextPacket);
+            }
+
+            if (flag.equals("S")) {
+                int currentNumber = -1;
+                oldMessage = oldMessage.substring(headerIndex + 1);
+                System.out.println("ACK: " + oldMessage + " received");
+                try {
+                    currentNumber = Integer.parseInt(oldMessage);
+                } catch (NumberFormatException e) {
+                    System.out.println("Error parsing sequence number: " + e.getMessage());
+                }
+                if (currentNumber == sequenceNum) {
+                    canSend = true;
+                } else {
+                    canSend = false;
+                }
             }
         }
         setFlags();
+    }
+
+    private void sendAck() {
+        String ackString = "ACK:" + sequenceNum;
+        Packet p = new Packet(ackString, id, currentPath.get(currentPath.size() - 2));
+        sendPacket(p);
+        sequenceNum++;
     }
 
     private synchronized void setFlags() {
@@ -601,11 +637,10 @@ public class RingoApp {
      */
     private synchronized void calculateOptimalRing(Node key) {
         if (opt.size() == numRingos) {
-            /*
             for (int i = 0; i < opt.size(); i++) {
-                System.out.print(opt.get(i).toString());
+                System.out.print(opt.get(i).toString() + "|");
             }
-            */
+            System.out.print("\n");
             return;
         }
 
@@ -741,7 +776,7 @@ public class RingoApp {
         {
             totLength += count;
         }
-        System.out.println("Total Length :" + totLength);
+        System.out.println("Total Length : " + totLength);
 
         int noOfPackets = totLength / MAX_PACKET_SIZE;
         System.out.println("No of packets : " + noOfPackets);
@@ -749,9 +784,9 @@ public class RingoApp {
         int off = noOfPackets * MAX_PACKET_SIZE;
 
         int lastPackLen = totLength - off;
-        System.out.println("\nLast packet Length : " + lastPackLen);
+        System.out.println("Last packet Length : " + lastPackLen);
 
-        byte[] lastPack = new byte[lastPackLen-1];  //create new array without redundant information
+        byte[] lastPack = new byte[lastPackLen - 1];
 
 
         fis.close();
@@ -762,16 +797,24 @@ public class RingoApp {
             if (noOfPackets <= 0) {
                 break;
             }
-            System.out.println(new String(sendData));
+            /*
+            while (!canSend) {
+                // Wait until canSend is true
+            }
+            */
             Packet p = new Packet("4:" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
-            System.out.println("========");
             noOfPackets--;
+            // canSend = false;
         }
         lastPack = Arrays.copyOf(sendData, lastPackLen);
         Packet p = new Packet("4:" + new String(lastPack, "UTF-8"), id, next);
         sendPacket(p);
         System.out.println("Last packet sent");
+        // Send terminating packet
+        p = new Packet("4:x", id, next);
+        sendPacket(p);
+        fis1.close();
     }
 
     /**
