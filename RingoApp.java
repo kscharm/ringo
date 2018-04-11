@@ -10,30 +10,31 @@ import java.util.concurrent.Executors;
  */
 public class RingoApp {
     // Initialize data structures
-    public static Map<Node, NodeTime[]> globalRTT = Collections.synchronizedMap(new HashMap<Node, NodeTime[]>());
-    public static List<Node> opt = new LinkedList<>();
-    public static List<Node> currentPath = new LinkedList<>();
-    public static DatagramSocket socket = null;
-    public static InetAddress pocHost = null;
-    public static Node id = null; 
-    public static int port = -1;
-    public static int pocPort = -1;
-    public static int numRingos = -1;
-    public static int rttLength = 0;
-    public static int sequenceNum = 0;
-    public static String ipaddr = null;
-    public static String flag = null;
+    private static Map<Node, NodeTime[]> globalRTT = Collections.synchronizedMap(new HashMap<Node, NodeTime[]>());
+    private static List<Node> opt = new LinkedList<>();
+    private static List<Node> currentPath = new LinkedList<>();
+    private static DatagramSocket socket = null;
+    private static InetAddress pocHost = null;
+    private static Node id = null; 
+    private static int port = -1;
+    private static int pocPort = -1;
+    private static int numRingos = -1;
+    private static int rttLength = 0;
+    private static int sequenceNum = 0;
+    private static String ipaddr = null;
+    private static String flag = null;
     private static String sourceFilePath = System.getProperty("user.dir");
+    private static String fileName = null;
     private static final int MAX_PACKET_SIZE = 65500;
-    private static File file = null;
-    private static FileOutputStream out = null;
+    private static File outFile = null;
+    private static FileOutputStream fileOut = null;
     // Flags
     static volatile boolean discovery = true;
     static volatile boolean rttCalc = false;
     static volatile boolean rttTransfer = false;
     static volatile boolean calcRing = false;
     static volatile boolean pathTransfer = false;
-    static volatile boolean canSend = true;
+    static volatile boolean ackReceived = true;
 
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
@@ -109,7 +110,9 @@ public class RingoApp {
         // Start receive thread
         receiveThread.submit(new ReceiveThread());
 
-        // TODO: Find optimal ring
+        // Start keep alive thread
+        // keepAliveThread.submit(new KeepAliveThread());
+
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
         System.out.println("1) send <filename>");
@@ -119,6 +122,7 @@ public class RingoApp {
         System.out.println("5) disconnect");
         // Start interactive interface
         while(true) {
+            System.out.print("\n");
             System.out.print("Ringo command: ");
             String input = scan.nextLine();
             if (input.indexOf("send") != -1) {
@@ -126,15 +130,8 @@ public class RingoApp {
                 if (!flag.equals("S")) {
                     System.out.println("Can only send files from a Sender Ringo.");
                 } else {
-                    try {
-                        file = new File(System.getProperty("user.dir") + "\\output.txt");
-                        out = new FileOutputStream(file);
-                    } catch (FileNotFoundException e) {
-                        System.out.println("File error: " + e.getMessage());
-                    }
-                    System.out.println(input);
-                    String filename = input.substring(input.indexOf("d") + 2, input.length());
-                    sourceFilePath +=  "\\" + filename;
+                    fileName = input.substring(input.indexOf("d") + 2, input.length());
+                    sourceFilePath +=  "\\" + fileName;
                     System.out.println("Sending file with path: " + sourceFilePath);
                     try {
                         sendFile();
@@ -351,8 +348,7 @@ public class RingoApp {
             send();
         }
         /**
-         * Creates a new packet and sends it to all other active Ringos.
-         * Currently supports peer discovery and RTT transfer.
+         * Sends a packet with a given payload to a given destination.
          */
         public void send() {
             String payload = p.getPayload();
@@ -384,8 +380,8 @@ public class RingoApp {
         public void keepAlive() {
             Timer timer = new Timer();
             if (!discovery) {
-                // Once discovery is complete, schedule alive packets to be sent every minute
-                timer.schedule(new SendAlivePackets(), 0, 60000);
+                // Once discovery is complete, schedule alive packets to be sent every 15 seconds
+                timer.schedule(new SendAlivePackets(), 0, 15000);
             }
         }
     }
@@ -493,53 +489,39 @@ public class RingoApp {
             for (Node n : currentPath) {
                 System.out.println(n.toString());
             }
-
-            if (flag.equals("F")) {
-                int forwarderIndex = -1;
-                for (int i = 0; i < currentPath.size(); i++){
-                    if (currentPath.get(i).getFlag().equals("F")) {
-                        forwarderIndex = i;
-                    }
-
-                }
-                Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex + 1));
-                forward(nextPacket);
-            }
- 
+            forwarderCheck(oldMessage);
             if (flag.equals("R") && currentPath != null) {
                 pathTransfer = false;
             }
         }
-
-        // Header 4 means sending the file
         if (header.equals("4")) {
-            if (flag.equals("F")) {
-                int forwarderIndex = -1;
-                for (int i = 0; i < currentPath.size(); i++){
-                    if (currentPath.get(i).getFlag().equals("F")) {
-                        forwarderIndex = i;
-                        break;
-                    }
-                }
-                Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex + 1));
-                forward(nextPacket);
+            forwarderCheck(oldMessage);
+            if (flag.equals("R")) {
+                // Construct destination file path (Note: change the name after the "//" to test sample output file)
+                String destFilePath = System.getProperty("user.dir") + "//" + message.substring(headerIndex + 1);
+                outFile = new File(destFilePath);
+                fileOut = new FileOutputStream(outFile);
             }
-
+        }
+        // Header 5 means sending the file
+        if (header.equals("5")) {
+            forwarderCheck(oldMessage);
             if (flag.equals("R")) {
                 oldMessage = oldMessage.substring(headerIndex + 1);
                 byte[] messageBytes = oldMessage.getBytes();
-                int length = dp.getLength() - 2; // Subtract 2 for the header
-                System.out.println("Packet length: " + length);
-                out.write(messageBytes, 0, messageBytes.length);
+                int length = dp.getLength() - 2;
+                fileOut.write(messageBytes, 0, messageBytes.length);
                 System.out.println("Packet written to file");
-                out.flush();
+                fileOut.flush();
                 if (oldMessage.equals("x")) {
                     System.out.println("Closing file output stream");
-                    out.close();
+                    fileOut.close();
                 }
                 sendAck();
             }
         }
+
+        // ACK header means we got an ACK from the receiver
         if (header.equals("ACK")) {
             if (flag.equals("F")) {
                 int forwarderIndex = -1;
@@ -550,6 +532,7 @@ public class RingoApp {
                     }
                 }
                 Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
+                System.out.println("Forwarding ACK...");
                 forward(nextPacket);
             }
 
@@ -563,13 +546,27 @@ public class RingoApp {
                     System.out.println("Error parsing sequence number: " + e.getMessage());
                 }
                 if (currentNumber == sequenceNum) {
-                    canSend = true;
+                    ackReceived = true;
                 } else {
-                    canSend = false;
+                    ackReceived = false;
                 }
             }
         }
         setFlags();
+    }
+
+    private void forwarderCheck(String message) {
+        if (flag.equals("F")) {
+            int forwarderIndex = -1;
+            for (int i = 0; i < currentPath.size(); i++){
+                if (currentPath.get(i).getFlag().equals("F")) {
+                    forwarderIndex = i;
+                    break;
+                }
+            }
+            Packet nextPacket = new Packet(message, id, currentPath.get(forwarderIndex + 1));
+            forward(nextPacket);
+        }
     }
 
     private void sendAck() {
@@ -776,7 +773,7 @@ public class RingoApp {
         {
             totLength += count;
         }
-        System.out.println("Total Length : " + totLength);
+        System.out.println("Total length : " + totLength);
 
         int noOfPackets = totLength / MAX_PACKET_SIZE;
         System.out.println("No of packets : " + noOfPackets);
@@ -784,13 +781,16 @@ public class RingoApp {
         int off = noOfPackets * MAX_PACKET_SIZE;
 
         int lastPackLen = totLength - off;
-        System.out.println("Last packet Length : " + lastPackLen);
+        System.out.println("Last packet length : " + lastPackLen);
 
         byte[] lastPack = new byte[lastPackLen - 1];
 
 
         fis.close();
         Node next = currentPath.get(1);
+        Packet namePack = new Packet("4:" + fileName, id, next);
+        sendPacket(namePack);
+        System.out.println("Sent file name to receiver");
         FileInputStream fis1 = new FileInputStream(file);
         while ((count = fis1.read(sendData)) != -1 )
         { 
@@ -802,17 +802,17 @@ public class RingoApp {
                 // Wait until canSend is true
             }
             */
-            Packet p = new Packet("4:" + new String(sendData, "UTF-8"), id, next);
+            Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
             noOfPackets--;
             // canSend = false;
         }
         lastPack = Arrays.copyOf(sendData, lastPackLen);
-        Packet p = new Packet("4:" + new String(lastPack, "UTF-8"), id, next);
+        Packet p = new Packet("5:" + new String(lastPack, "UTF-8"), id, next);
         sendPacket(p);
         System.out.println("Last packet sent");
         // Send terminating packet
-        p = new Packet("4:x", id, next);
+        p = new Packet("5:x", id, next);
         sendPacket(p);
         fis1.close();
     }
@@ -827,7 +827,7 @@ public class RingoApp {
     class SendAlivePackets extends TimerTask {
         public void run() {
             // Send the payload to every ringo
-            byte[] sendData = new byte[2048];
+            byte[] sendData = new byte[1024];
             String payload = "Alive:" + id.toString();
             sendData = payload.getBytes();
             try {
@@ -835,7 +835,7 @@ public class RingoApp {
                     Node neighbor = ringo.active.get(j);
                     InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                     int sendPort = neighbor.getPort();
-                    if (sendPort != port) {
+                    if (sendPort != port && !ipaddr.equals(neighbor.getAddress())) {
                         DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
                         socket.send(p);
                     }
