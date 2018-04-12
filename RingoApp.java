@@ -34,12 +34,14 @@ public class RingoApp {
     static volatile boolean rttTransfer = false;
     static volatile boolean calcRing = false;
     static volatile boolean pathTransfer = false;
-    static volatile boolean ackReceived = true;
-
+    static volatile Boolean ackReceived = false;
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
     private static ExecutorService sendThread = Executors.newCachedThreadPool();
     private static ExecutorService keepAliveThread = Executors.newSingleThreadExecutor();
+    private static ExecutorService sendFileThread = Executors.newSingleThreadExecutor();
+
+
 
     // Define global ringo object
     Ringo ringo = null;
@@ -131,13 +133,9 @@ public class RingoApp {
                     System.out.println("Can only send files from a Sender Ringo.");
                 } else {
                     fileName = input.substring(input.indexOf("d") + 2, input.length());
-                    sourceFilePath +=  "\\" + fileName;
+                    sourceFilePath +=  "\\" + fileName + "\\";
                     System.out.println("Sending file with path: " + sourceFilePath);
-                    try {
-                        sendFile();
-                    } catch (IOException e) {
-                        System.out.println("Problem sending file: " + e.getMessage());
-                    }
+                    sendFileThread.submit(new SendFileThread());
                     sourceFilePath = System.getProperty("user.dir");       
                 }
             } else if (input.equals("show-matrix")) {
@@ -370,6 +368,19 @@ public class RingoApp {
         }
     }
 
+    class SendFileThread implements Runnable
+    {
+        @Override
+        public void run() {
+            try {
+                sendFile();
+            } catch (IOException e) {
+                System.out.println("I SUCK" + e.getMessage());
+            }
+
+        }
+    }
+
     class KeepAliveThread implements Runnable {
         public void run() {
             keepAlive();
@@ -498,7 +509,7 @@ public class RingoApp {
             forwarderCheck(oldMessage);
             if (flag.equals("R")) {
                 // Construct destination file path (Note: change the name after the "//" to test sample output file)
-                String destFilePath = System.getProperty("user.dir") + "//" + message.substring(headerIndex + 1);
+                String destFilePath = System.getProperty("user.dir") + "//" + "output.txt"; //message.substring(headerIndex + 1);
                 outFile = new File(destFilePath);
                 fileOut = new FileOutputStream(outFile);
             }
@@ -546,7 +557,10 @@ public class RingoApp {
                     System.out.println("Error parsing sequence number: " + e.getMessage());
                 }
                 if (currentNumber == sequenceNum) {
+                    sequenceNum++;
                     ackReceived = true;
+                    System.out.println(ackReceived);
+                    ackReceived.notify();
                 } else {
                     ackReceived = false;
                 }
@@ -573,7 +587,6 @@ public class RingoApp {
         String ackString = "ACK:" + sequenceNum;
         Packet p = new Packet(ackString, id, currentPath.get(currentPath.size() - 2));
         sendPacket(p);
-        sequenceNum++;
     }
 
     private synchronized void setFlags() {
@@ -762,7 +775,7 @@ public class RingoApp {
         }
     }
 
-    public void sendFile() throws IOException {
+    public synchronized void sendFile() throws IOException {
         byte[] sendData = new byte[MAX_PACKET_SIZE];
         File file = new File(sourceFilePath);
         FileInputStream fis = new FileInputStream(file);
@@ -797,15 +810,18 @@ public class RingoApp {
             if (noOfPackets <= 0) {
                 break;
             }
-            /*
-            while (!canSend) {
-                // Wait until canSend is true
-            }
-            */
             Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
+
+            try {
+                while(!ackReceived) {
+                    ackReceived.wait();
+                }
+            } catch (InterruptedException e) {
+                System.out.println(e.getMessage());
+            }
+            ackReceived = false;
             noOfPackets--;
-            // canSend = false;
         }
         lastPack = Arrays.copyOf(sendData, lastPackLen);
         Packet p = new Packet("5:" + new String(lastPack, "UTF-8"), id, next);
