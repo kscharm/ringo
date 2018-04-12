@@ -785,7 +785,7 @@ public class RingoApp {
     }
 
     public void sendFile() throws IOException {
-        byte[] sendData = new byte[MAX_PACKET_SIZE];
+        byte[] sendData = new byte[MAX_PACKET_SIZE - 2];
         File file = new File(sourceFilePath);
         FileInputStream fis = new FileInputStream(file);
         int totLength = 0;
@@ -795,9 +795,9 @@ public class RingoApp {
         {
             totLength += count;
         }
-        int noOfPackets = totLength / MAX_PACKET_SIZE;
+        int noOfPackets = totLength / (MAX_PACKET_SIZE -2);
         System.out.println("No of packets : " + noOfPackets);
-        int off = noOfPackets * MAX_PACKET_SIZE;
+        int off = noOfPackets * (MAX_PACKET_SIZE -2);
         int lastPackLen = totLength - off;
         System.out.println("Last packet length : " + lastPackLen);
         byte[] lastPack = new byte[lastPackLen - 1];
@@ -807,11 +807,11 @@ public class RingoApp {
         sendPacket(namePack);
         System.out.println("Sent file name to receiver");
         FileInputStream fis1 = new FileInputStream(file);
-        while ((count = fis1.read(sendData)) != -1 ) {
+        while ((count = fis1.read(sendData, 0, MAX_PACKET_SIZE - 2)) != -1 ) {
             if (noOfPackets <= 0) {
                 break;
             }
-            Packet p = new Packet("5:1" + new String(sendData, "UTF-8"), id, next);
+            Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
             synchronized (ackReceived) {
                 try {
