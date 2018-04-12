@@ -23,7 +23,7 @@ public class RingoApp {
     private static int sequenceNum = 0;
     private static String ipaddr = null;
     private static String flag = null;
-    private static String sourceFilePath = System.getProperty("user.dir");
+    private static String sourceFilePath = null;
     private static String fileName = null;
     private static final int MAX_PACKET_SIZE = 65500;
     private static File outFile = null;
@@ -133,10 +133,14 @@ public class RingoApp {
                     System.out.println("Can only send files from a Sender Ringo.");
                 } else {
                     fileName = input.substring(input.indexOf("d") + 2, input.length());
-                    sourceFilePath +=  "\\" + fileName + "\\";
-                    System.out.println("Sending file with path: " + sourceFilePath);
-                    sendFileThread.submit(new SendFileThread());
-                    sourceFilePath = System.getProperty("user.dir");       
+                    sourceFilePath = System.getProperty("user.dir") + "\\" + fileName;
+                    if (!new File(sourceFilePath).exists())
+                    {
+                        System.out.println("File does not exist!");
+                    } else {
+                        System.out.println("Sending file with path: " + sourceFilePath);
+                        sendFileThread.submit(new SendFileThread());
+                    } 
                 }
             } else if (input.equals("show-matrix")) {
                 if (ringo.active.size() == numRingos) {
@@ -375,7 +379,7 @@ public class RingoApp {
             try {
                 sendFile();
             } catch (IOException e) {
-                System.out.println("I SUCK" + e.getMessage());
+                System.out.println("Error sending file: " + e.getMessage());
             }
 
         }
@@ -519,16 +523,17 @@ public class RingoApp {
             forwarderCheck(oldMessage);
             if (flag.equals("R")) {
                 oldMessage = oldMessage.substring(headerIndex + 1);
-                byte[] messageBytes = oldMessage.getBytes();
-                int length = dp.getLength() - 2;
-                fileOut.write(messageBytes, 0, messageBytes.length);
-                System.out.println("Packet written to file");
-                fileOut.flush();
                 if (oldMessage.equals("x")) {
                     System.out.println("Closing file output stream");
                     fileOut.close();
+                } else {
+                    byte[] messageBytes = oldMessage.getBytes();
+                    int length = dp.getLength() - 2;
+                    fileOut.write(messageBytes, 0, messageBytes.length);
+                    System.out.println("Packet written to file");
+                    fileOut.flush();
+                    sendAck();
                 }
-                sendAck();
             }
         }
 
@@ -559,7 +564,6 @@ public class RingoApp {
                 if (currentNumber == sequenceNum) {
                     sequenceNum++;
                     ackReceived = true;
-                    System.out.println(ackReceived);
                     ackReceived.notify();
                 } else {
                     ackReceived = false;
@@ -786,19 +790,12 @@ public class RingoApp {
         {
             totLength += count;
         }
-        System.out.println("Total length : " + totLength);
-
         int noOfPackets = totLength / MAX_PACKET_SIZE;
         System.out.println("No of packets : " + noOfPackets);
-
         int off = noOfPackets * MAX_PACKET_SIZE;
-
         int lastPackLen = totLength - off;
         System.out.println("Last packet length : " + lastPackLen);
-
         byte[] lastPack = new byte[lastPackLen - 1];
-
-
         fis.close();
         Node next = currentPath.get(1);
         Packet namePack = new Packet("4:" + fileName, id, next);
@@ -812,13 +809,14 @@ public class RingoApp {
             }
             Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
-
             try {
+                System.out.println("Ack received value: " + ackReceived);
                 while(!ackReceived) {
+                    System.out.println("Waiting...");
                     ackReceived.wait();
                 }
             } catch (InterruptedException e) {
-                System.out.println(e.getMessage());
+                System.out.println("Interrupted thread: " + e.getMessage());
             }
             ackReceived = false;
             noOfPackets--;
