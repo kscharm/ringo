@@ -3,6 +3,7 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Interactive token-ring networking application.
@@ -34,7 +35,7 @@ public class RingoApp {
     static volatile boolean rttTransfer = false;
     static volatile boolean calcRing = false;
     static volatile boolean pathTransfer = false;
-    static volatile Boolean ackReceived = false;
+    static volatile AtomicBoolean ackReceived = new AtomicBoolean(false);
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
     private static ExecutorService sendThread = Executors.newCachedThreadPool();
@@ -561,12 +562,14 @@ public class RingoApp {
                 } catch (NumberFormatException e) {
                     System.out.println("Error parsing sequence number: " + e.getMessage());
                 }
-                if (currentNumber == sequenceNum) {
-                    sequenceNum++;
-                    ackReceived = true;
-                    ackReceived.notify();
-                } else {
-                    ackReceived = false;
+                synchronized (ackReceived) {
+                    if (currentNumber == sequenceNum) {
+                        sequenceNum++;
+                        ackReceived.set(true);
+                        ackReceived.notify();
+                    } else {
+                        ackReceived.set(false);
+                    }
                 }
             }
         }
@@ -587,10 +590,12 @@ public class RingoApp {
         }
     }
 
-    private void sendAck() {
+    private synchronized void sendAck() {
         String ackString = "ACK:" + sequenceNum;
+        System.out.println(ackString);
         Packet p = new Packet(ackString, id, currentPath.get(currentPath.size() - 2));
         sendPacket(p);
+        sequenceNum++;
     }
 
     private synchronized void setFlags() {
@@ -779,7 +784,7 @@ public class RingoApp {
         }
     }
 
-    public synchronized void sendFile() throws IOException {
+    public void sendFile() throws IOException {
         byte[] sendData = new byte[MAX_PACKET_SIZE];
         File file = new File(sourceFilePath);
         FileInputStream fis = new FileInputStream(file);
@@ -802,28 +807,37 @@ public class RingoApp {
         sendPacket(namePack);
         System.out.println("Sent file name to receiver");
         FileInputStream fis1 = new FileInputStream(file);
-        while ((count = fis1.read(sendData)) != -1 )
-        { 
+        while ((count = fis1.read(sendData)) != -1 ) {
             if (noOfPackets <= 0) {
                 break;
             }
-            Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
+            Packet p = new Packet("5:1" + new String(sendData, "UTF-8"), id, next);
             sendPacket(p);
+            synchronized (ackReceived) {
+                try {
+                    while (!ackReceived.get()) {
+                        ackReceived.wait();
+                    }
+                } catch (InterruptedException e) {
+                    System.out.println("Interrupted thread: " + e.getMessage());
+                }
+                ackReceived.set(false);
+                noOfPackets--;
+            }
+        }
+        lastPack = Arrays.copyOf(sendData, lastPackLen);
+        Packet p = new Packet("5:" + new String(lastPack, "UTF-8"), id, next);
+        sendPacket(p);
+        synchronized (ackReceived) {
             try {
-                System.out.println("Ack received value: " + ackReceived);
-                while(!ackReceived) {
-                    System.out.println("Waiting...");
+                while (!ackReceived.get()) {
                     ackReceived.wait();
                 }
             } catch (InterruptedException e) {
                 System.out.println("Interrupted thread: " + e.getMessage());
             }
-            ackReceived = false;
-            noOfPackets--;
+            ackReceived.set(false);
         }
-        lastPack = Arrays.copyOf(sendData, lastPackLen);
-        Packet p = new Packet("5:" + new String(lastPack, "UTF-8"), id, next);
-        sendPacket(p);
         System.out.println("Last packet sent");
         // Send terminating packet
         p = new Packet("5:x", id, next);
