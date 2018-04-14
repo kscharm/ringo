@@ -361,7 +361,11 @@ public class RingoApp {
                 destAddress = destAddress.substring(destAddress.indexOf("/") + 1);
             }
             byte[] buffer = new byte[MAX_PACKET_SIZE];
-            buffer = payload.getBytes();
+            if (p.getData() != null) {
+                buffer = p.getData();
+            } else {
+                buffer = payload.getBytes();
+            }
             try {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length, InetAddress.getByName(destAddress), dest.getPort());
                 socket.send(packet);
@@ -413,133 +417,153 @@ public class RingoApp {
         String recAddr = null;
         int recPort = 0;
         int headerIndex = message.indexOf(":");
-        String header = message.substring(0, headerIndex);
-        message = message.substring(headerIndex + 1);
+        String header = null;
+        if (headerIndex != -1 && headerIndex < 5) {
+            header = message.substring(0, headerIndex);
+            message = message.substring(headerIndex + 1);
+        }
         DatagramPacket p = null;
         String f = null;
-        //System.out.println("Got message: " + message);
-        if (header.equals("Alive")) {
-            // TODO: determine if any Ringos went down
-            String[] info = message.split(",");
-        }
-        // Header of 1 means peer discovery
-        if (header.equals("1")) {
-            String[] info = message.split(",");
-            try {
-                recAddr = info[0];
-                recPort = Integer.parseInt(info[1]);
-                f = info[2];
-            } catch (NumberFormatException e) {
-                System.out.println("Invalid response: " + e);
+        if (header != null) {
+            if (header.equals("Alive")) {
+                // TODO: determine if any Ringos went down
+                String[] info = message.split(",");
             }
-            Node tba = new Node(recAddr, recPort, f);
-            if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
-                ringo.active.add(tba);
-                // Send each node in the active list to all neighbors
-                for (int i = 0; i < ringo.active.size(); i++) {
-                    Node curr = ringo.active.get(i);
-                    for (int j = 0; j < ringo.active.size(); j++) {
-                        if (i != j) {
-                            Node dest = ringo.active.get(j);
-                            String payload = header + ":" + curr.toString();
-                            Packet packet = new Packet(payload, curr, dest);
-                            sendPacket(packet);
-                        }
-                    }
-                }
-            }
-        }
-        // Header of 2 means RTT vector exchange
-        if (header.equals("2")) {
-            String[] info = message.split("x");
-            NodeTime[] ntArray = new NodeTime[numRingos];
-            Node parent = null;
-            String f1 = null;
-            for (int i = 0; i < info.length; i++) {
-                String[] entry = info[i].split(",");
+            // Header of 1 means peer discovery
+            if (header.equals("1")) {
+                String[] info = message.split(",");
                 try {
-                    recAddr = entry[0];
-                    recPort = Integer.parseInt(entry[1]);
-                    f1 = entry[2];
-                    Node n = new Node(recAddr, recPort, f1);
-                    if (i == 0) {
-                        if (globalRTT.containsKey(n)) {
-                            break;
-                        }
-                        parent = n;
-                    } else {
-                        int time = Integer.parseInt(entry[3]);
-                        NodeTime nt = new NodeTime(n, time);
-                        ntArray[i - 1] = nt;
-                    }
+                    recAddr = info[0];
+                    recPort = Integer.parseInt(info[1]);
+                    f = info[2];
                 } catch (NumberFormatException e) {
                     System.out.println("Invalid response: " + e);
                 }
+                Node tba = new Node(recAddr, recPort, f);
+                if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
+                    ringo.active.add(tba);
+                    // Send each node in the active list to all neighbors
+                    for (int i = 0; i < ringo.active.size(); i++) {
+                        Node curr = ringo.active.get(i);
+                        for (int j = 0; j < ringo.active.size(); j++) {
+                            if (i != j) {
+                                Node dest = ringo.active.get(j);
+                                String payload = header + ":" + curr.toString();
+                                Packet packet = new Packet(payload, curr, dest);
+                                sendPacket(packet);
+                            }
+                        }
+                    }
+                }
             }
-            if (parent != null) {
-                globalRTT.put(parent, ntArray);
-                sendRTT();
-            }
-        }
-
-        // Header 3 means sending path information to all nodes in the optimal path
-        if (header.equals("3")) {
-            String[] info = message.split("x");
-            List<Node> temp = new LinkedList<>();
-            try {
+            // Header of 2 means RTT vector exchange
+            else if (header.equals("2")) {
+                String[] info = message.split("x");
+                NodeTime[] ntArray = new NodeTime[numRingos];
+                Node parent = null;
+                String f1 = null;
                 for (int i = 0; i < info.length; i++) {
-                    String[] node = info[i].split(",");
-                    String ip = node[0];
-                    int port = Integer.parseInt(node[1]);
-                    String f2 = node[2];
-
-                    Node n = new Node(ip, port, f2);
-                    temp.add(n);
+                    String[] entry = info[i].split(",");
+                    try {
+                        recAddr = entry[0];
+                        recPort = Integer.parseInt(entry[1]);
+                        f1 = entry[2];
+                        Node n = new Node(recAddr, recPort, f1);
+                        if (i == 0) {
+                            if (globalRTT.containsKey(n)) {
+                                break;
+                            }
+                            parent = n;
+                        } else {
+                            int time = Integer.parseInt(entry[3]);
+                            NodeTime nt = new NodeTime(n, time);
+                            ntArray[i - 1] = nt;
+                        }
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid response: " + e);
+                    }
                 }
-            } catch (NumberFormatException e) {
-                System.out.println(e.getMessage());
-            }
-
-            currentPath = temp;
-            System.out.println("Current path:");
-            for (Node n : currentPath) {
-                System.out.println(n.toString());
-            }
-            forwarderCheck(oldMessage);
-            if (flag.equals("R") && currentPath != null) {
-                pathTransfer = false;
-            }
-        }
-        if (header.equals("4")) {
-            forwarderCheck(oldMessage);
-            if (flag.equals("R")) {
-                // Construct destination file path (Note: change the name after the "//" to test sample output file)
-                String destFilePath = System.getProperty("user.dir") + "//" + "output.txt"; //message.substring(headerIndex + 1);
-                outFile = new File(destFilePath);
-                fileOut = new FileOutputStream(outFile);
-            }
-        }
-        // Header 5 means sending the file
-        if (header.equals("5")) {
-            forwarderCheck(oldMessage);
-            if (flag.equals("R")) {
-                oldMessage = oldMessage.substring(headerIndex + 1);
-                if (oldMessage.equals("x")) {
-                    System.out.println("Closing file output stream");
-                    fileOut.close();
-                } else {
-                    byte[] messageBytes = oldMessage.getBytes();
-                    int length = dp.getLength() - 2;
-                    fileOut.write(messageBytes, 0, messageBytes.length);
-                    System.out.println("Packet written to file");
-                    fileOut.flush();
-                    sendAck();
+                if (parent != null) {
+                    globalRTT.put(parent, ntArray);
+                    sendRTT();
                 }
             }
-        }
+    
+            // Header 3 means sending path information to all nodes in the optimal path
+            else if (header.equals("3")) {
+                String[] info = message.split("x");
+                List<Node> temp = new LinkedList<>();
+                try {
+                    for (int i = 0; i < info.length; i++) {
+                        String[] node = info[i].split(",");
+                        String ip = node[0];
+                        int port = Integer.parseInt(node[1]);
+                        String f2 = node[2];
+    
+                        Node n = new Node(ip, port, f2);
+                        temp.add(n);
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println(e.getMessage());
+                }
+    
+                currentPath = temp;
+                System.out.println("Current path:");
+                for (Node n : currentPath) {
+                    System.out.println(n.toString());
+                }
+                forwarderCheck(oldMessage);
+                if (flag.equals("R") && currentPath != null) {
+                    pathTransfer = false;
+                }
+            }
+            else if (header.equals("4")) {
+                forwarderCheck(oldMessage);
+                if (flag.equals("R")) {
+                    // Construct destination file path (Note: change the name after the "//" to test sample output file)
+                    String destFilePath = System.getProperty("user.dir") + "//" + "output.jpg"; //message.substring(headerIndex + 1);
+                    outFile = new File(destFilePath);
+                    fileOut = new FileOutputStream(outFile);
+                }
+            }
 
-        // ACK header means we got an ACK from the receiver
-        if (header.equals("ACK")) {
+            // ACK header means we got an ACK from the receiver
+            else if (header.equals("ACK")) {
+                if (flag.equals("F")) {
+                    int forwarderIndex = -1;
+                    for (int i = 0; i < currentPath.size(); i++){
+                        if (currentPath.get(i).getFlag().equals("F")) {
+                            forwarderIndex = i;
+                            break;
+                        }
+                    }
+                    Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
+                    System.out.println("Forwarding ACK...");
+                    forward(nextPacket);
+                }
+    
+                if (flag.equals("S")) {
+                    int currentNumber = -1;
+                    oldMessage = oldMessage.substring(headerIndex + 1);
+                    System.out.println("ACK: " + oldMessage + " received");
+                    try {
+                        currentNumber = Integer.parseInt(oldMessage);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Error parsing sequence number: " + e.getMessage());
+                    }
+                    synchronized (ackReceived) {
+                        if (currentNumber == sequenceNum) {
+                            sequenceNum++;
+                            ackReceived.set(true);
+                            ackReceived.notify();
+                        } else {
+                            ackReceived.set(false);
+                        }
+                    }
+                }
+            }
+            setFlags();
+        } else {
             if (flag.equals("F")) {
                 int forwarderIndex = -1;
                 for (int i = 0; i < currentPath.size(); i++){
@@ -548,32 +572,21 @@ public class RingoApp {
                         break;
                     }
                 }
-                Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
-                System.out.println("Forwarding ACK...");
+                Packet nextPacket = new Packet(dp.getData(), id, currentPath.get(forwarderIndex + 1));
                 forward(nextPacket);
             }
-
-            if (flag.equals("S")) {
-                int currentNumber = -1;
-                oldMessage = oldMessage.substring(headerIndex + 1);
-                System.out.println("ACK: " + oldMessage + " received");
-                try {
-                    currentNumber = Integer.parseInt(oldMessage);
-                } catch (NumberFormatException e) {
-                    System.out.println("Error parsing sequence number: " + e.getMessage());
-                }
-                synchronized (ackReceived) {
-                    if (currentNumber == sequenceNum) {
-                        sequenceNum++;
-                        ackReceived.set(true);
-                        ackReceived.notify();
-                    } else {
-                        ackReceived.set(false);
-                    }
+            if (flag.equals("R")) {
+                if (oldMessage.equals("x")) {
+                    System.out.println("Closing file output stream");
+                    fileOut.close();
+                } else {
+                    fileOut.write(dp.getData(), 0, dp.getLength());
+                    System.out.println("Packet written to file");
+                    fileOut.flush();
+                    sendAck();
                 }
             }
         }
-        setFlags();
     }
 
     private void forwarderCheck(String message) {
@@ -785,7 +798,7 @@ public class RingoApp {
     }
 
     public void sendFile() throws IOException {
-        byte[] sendData = new byte[MAX_PACKET_SIZE - 2];
+        byte[] sendData = new byte[MAX_PACKET_SIZE];
         File file = new File(sourceFilePath);
         FileInputStream fis = new FileInputStream(file);
         int totLength = 0;
@@ -795,9 +808,9 @@ public class RingoApp {
         {
             totLength += count;
         }
-        int noOfPackets = totLength / (MAX_PACKET_SIZE -2);
+        int noOfPackets = totLength / (MAX_PACKET_SIZE);
         System.out.println("No of packets : " + noOfPackets);
-        int off = noOfPackets * (MAX_PACKET_SIZE -2);
+        int off = noOfPackets * (MAX_PACKET_SIZE);
         int lastPackLen = totLength - off;
         System.out.println("Last packet length : " + lastPackLen);
         byte[] lastPack = new byte[lastPackLen - 1];
@@ -805,13 +818,12 @@ public class RingoApp {
         Node next = currentPath.get(1);
         Packet namePack = new Packet("4:" + fileName, id, next);
         sendPacket(namePack);
-        System.out.println("Sent file name to receiver");
         FileInputStream fis1 = new FileInputStream(file);
-        while ((count = fis1.read(sendData, 0, MAX_PACKET_SIZE - 2)) != -1 ) {
+        while ((count = fis1.read(sendData, 0, MAX_PACKET_SIZE)) != -1 ) {
             if (noOfPackets <= 0) {
                 break;
             }
-            Packet p = new Packet("5:" + new String(sendData, "UTF-8"), id, next);
+            Packet p = new Packet(sendData, id, next);
             sendPacket(p);
             synchronized (ackReceived) {
                 try {
@@ -826,7 +838,7 @@ public class RingoApp {
             }
         }
         lastPack = Arrays.copyOf(sendData, lastPackLen);
-        Packet p = new Packet("5:" + new String(lastPack, "UTF-8"), id, next);
+        Packet p = new Packet(lastPack, id, next);
         sendPacket(p);
         synchronized (ackReceived) {
             try {
@@ -840,7 +852,7 @@ public class RingoApp {
         }
         System.out.println("Last packet sent");
         // Send terminating packet
-        p = new Packet("5:x", id, next);
+        p = new Packet("x", id, next);
         sendPacket(p);
         fis1.close();
     }
@@ -886,6 +898,7 @@ class Packet {
     String payload;
     Node source;
     Node destination;
+    byte[] data;
 
     public Packet(String p, Node s, Node d) {
         payload = p;
@@ -893,8 +906,19 @@ class Packet {
         destination = d;
     }
 
+    public Packet(byte[] data, Node s, Node d) {
+        this.data = data;
+        payload = null;
+        source = s;
+        destination = d;
+    }
+
     public String getPayload() {
         return payload;
+    }
+
+    public byte[] getData() {
+        return data;
     }
 
     public Node getSender() {
