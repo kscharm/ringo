@@ -10,32 +10,47 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Authors: Kenneth Scharm and Rudy Lowenstein
  */
 public class RingoApp {
-    // Initialize data structures
+    // Data Structures
     private static Map<Node, NodeTime[]> globalRTT = Collections.synchronizedMap(new HashMap<Node, NodeTime[]>());
     private static List<Node> opt = new LinkedList<>();
     private static List<Node> currentPath = new LinkedList<>();
+    private static List<Node> fPath = new LinkedList<>();
+    private static List<Node> rPath = new LinkedList<>();
     private static DatagramSocket socket = null;
     private static InetAddress pocHost = null;
-    private static Node id = null; 
+    private static Node id = null;
+    private static Set<Node> alive = new HashSet<>();
+
+    //Integer Variables
     private static int port = -1;
     private static int pocPort = -1;
     private static int numRingos = -1;
     private static int rttLength = 0;
     private static int sequenceNum = 0;
+
+    //Constants
+    private static final int MAX_PACKET_SIZE = 65500;
+    private static final int NUM_ACKS = 100;
+    private static final int KEEP_ALIVE_TIME = 15000;
+
+    //String Declarations
     private static String ipaddr = null;
     private static String flag = null;
     private static String sourceFilePath = null;
     private static String fileName = null;
-    private static final int MAX_PACKET_SIZE = 65500;
+
+    //File Declarations
     private static File outFile = null;
     private static FileOutputStream fileOut = null;
-    // Flags
+
+    // Boolean Flags
     static volatile boolean discovery = true;
     static volatile boolean rttCalc = false;
     static volatile boolean rttTransfer = false;
     static volatile boolean calcRing = false;
     static volatile boolean pathTransfer = false;
     static volatile AtomicBoolean ackReceived = new AtomicBoolean(false);
+
     // Define Executor Services
     private static ExecutorService receiveThread = Executors.newSingleThreadExecutor();
     private static ExecutorService sendThread = Executors.newCachedThreadPool();
@@ -51,8 +66,10 @@ public class RingoApp {
         RingoApp app = new RingoApp();
         app.start(args);
     }
+
     /**
-     * Launches the Ringo application and starts the command-line interface.
+     * Starts the RingoApp Application
+     * @param args parameters entered on the command line
      */
     public void start(String[] args) {
         // Parse arguments
@@ -105,16 +122,27 @@ public class RingoApp {
         id = new Node(ipaddr, port, flag);
         ringo.active.add(id);
 
-        if (!pocHost.equals(0) && pocPort != 0) {
-            Packet first = new Packet("1:" + id.toString(), id, new Node(pocHost.getHostAddress(), pocPort));
-            sendPacket(first);
-        }
 
         // Start receive thread
         receiveThread.submit(new ReceiveThread());
 
-        // Start keep alive thread
-        // keepAliveThread.submit(new KeepAliveThread());
+        if (!pocHost.equals(0) && pocPort != 0) {
+            Packet first = new Packet("1:" + id.toString(), id, new Node(pocHost.getHostAddress(), pocPort));
+            sendPacket(first);
+            /*
+            synchronized (ackReceived) {
+                try {
+                    while (!ackReceived.get()) {
+                        ackReceived.wait();
+                    }
+                } catch (InterruptedException e) {
+                    System.out.println("Interrupted thread: " + e.getMessage());
+                }
+                ackReceived.set(false);
+            }
+            */
+        }
+
 
         Scanner scan = new Scanner(System.in);
         System.out.println("#### Ringo commands ####");
@@ -123,6 +151,7 @@ public class RingoApp {
         System.out.println("3) show-ring");
         System.out.println("4) offline <seconds>");
         System.out.println("5) disconnect");
+
         // Start interactive interface
         while(true) {
             System.out.print("\n");
@@ -165,6 +194,11 @@ public class RingoApp {
                     String s = input.substring(input.indexOf(" ") + 1, input.length());
                     int seconds = Integer.parseInt(s);
                     System.out.println("Ringo going offline for " + seconds + " seconds");
+                    try {
+                        Thread.sleep(seconds * 1000);
+                    } catch (InterruptedException e) {
+                        System.out.println("Cant Sleep: " + e.getMessage());
+                    }
                 } catch (NumberFormatException e) {
                     System.out.println("Invalid response " + e.getMessage());
                 }
@@ -212,10 +246,18 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Submits a packet for the send thread to transmit
+     * @param p the packet to be transmitted
+     */
     public void sendPacket(Packet p) {
         sendThread.submit(new SendThread(p));
     }
 
+
+    /**
+     * Calculates the path through the optimal ring to use
+     */
     public void calculatePath() {
         List<Node> forwardPath = new LinkedList<>();
         List<Node> reversePath = new LinkedList<>();
@@ -323,6 +365,9 @@ public class RingoApp {
         
         Packet p = new Packet(payload, id , next);
         sendPacket(p);
+
+        fPath = forwardPath;
+        rPath = reversePath;
     }
 
     /**
@@ -377,6 +422,9 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Thread for sending file data in a stream
+     */
     class SendFileThread implements Runnable
     {
         @Override
@@ -390,6 +438,9 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Thread for sending Keep-Alive packets to other Ringos
+     */
     class KeepAliveThread implements Runnable {
         public void run() {
             keepAlive();
@@ -399,26 +450,29 @@ public class RingoApp {
          */
         public void keepAlive() {
             Timer timer = new Timer();
-            if (!discovery) {
-                // Once discovery is complete, schedule alive packets to be sent every 15 seconds
-                timer.schedule(new SendAlivePackets(), 0, 15000);
-            }
+            // Once discovery is complete, schedule alive packets to be sent every 15 seconds
+            timer.schedule(new SendAlivePackets(), 0, KEEP_ALIVE_TIME);
+
         }
     }
-    
+
     /**
-     * Parses a message and extracts important information, depending on the flag.
+     *
+     * @param buffer data received by the socket
+     * @param dp Packet received by the socket
+     * @throws IOException
      */
     private synchronized void receiveMessage(byte[] buffer, DatagramPacket dp) throws IOException {
         String message = new String(buffer, 0, dp.getLength());
         String oldMessage = message;
+        System.out.println(message);
         message = message.replaceAll("[()]", ""); // Get rid of parenthesis
         message = message.replaceAll("\\s+", ""); // Get rid of white space
         String recAddr = null;
         int recPort = 0;
         int headerIndex = message.indexOf(":");
         String header = null;
-        if (headerIndex != -1 && headerIndex < 5) {
+        if (headerIndex != -1 && headerIndex < 10) {
             header = message.substring(0, headerIndex);
             message = message.substring(headerIndex + 1);
         }
@@ -426,9 +480,37 @@ public class RingoApp {
         String f = null;
         if (header != null) {
             if (header.equals("Alive")) {
-                // TODO: determine if any Ringos went down
                 String[] info = message.split(",");
+                try {
+                    recAddr = info[0];
+                    recPort = Integer.parseInt(info[1]);
+                    f = info[2];
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid response: " + e);
+                }
+                Node new_Alive = new Node(recAddr, recPort, f);
+                alive.add(new_Alive);
             }
+
+            if (header.equals("Down")) {
+                String[] info = message.split(",");
+                try {
+                    recAddr = info[0];
+                    recPort = Integer.parseInt(info[1]);
+                    f = info[2];
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid response: " + e);
+                }
+                Node downed = new Node(recAddr, recPort, f);
+                if (currentPath.contains(downed)) {
+                    if (currentPath.equals(fPath)) {
+                        currentPath = rPath;
+                    } else if (currentPath.equals(rPath)) {
+                        currentPath = fPath;
+                    } else {}
+                }
+            }
+
             // Header of 1 means peer discovery
             if (header.equals("1")) {
                 String[] info = message.split(",");
@@ -440,6 +522,7 @@ public class RingoApp {
                     System.out.println("Invalid response: " + e);
                 }
                 Node tba = new Node(recAddr, recPort, f);
+                //sendAck(tba);
                 if (recAddr != null && recPort != 0 && !ringo.active.contains(tba)) {
                     ringo.active.add(tba);
                     // Send each node in the active list to all neighbors
@@ -451,6 +534,21 @@ public class RingoApp {
                                 String payload = header + ":" + curr.toString();
                                 Packet packet = new Packet(payload, curr, dest);
                                 sendPacket(packet);
+                                /*
+                                synchronized (ackReceived) {
+                                    if (sequenceNum == NUM_ACKS) {
+                                        sequenceNum = 0;
+                                    }
+                                    try {
+                                        while (!ackReceived.get()) {
+                                            ackReceived.wait();
+                                        }
+                                    } catch (InterruptedException e) {
+                                        System.out.println("Interrupted thread: " + e.getMessage());
+                                    }
+                                    ackReceived.set(false);
+                                }
+                                */
                             }
                         }
                     }
@@ -521,7 +619,7 @@ public class RingoApp {
                 forwarderCheck(oldMessage);
                 if (flag.equals("R")) {
                     // Construct destination file path (Note: change the name after the "//" to test sample output file)
-                    String destFilePath = System.getProperty("user.dir") + "//" + "output.jpg"; //message.substring(headerIndex + 1);
+                    String destFilePath = System.getProperty("user.dir") + "//" + "output.txt"; //message.substring(headerIndex + 1);
                     outFile = new File(destFilePath);
                     fileOut = new FileOutputStream(outFile);
                 }
@@ -529,35 +627,57 @@ public class RingoApp {
 
             // ACK header means we got an ACK from the receiver
             else if (header.equals("ACK")) {
-                if (flag.equals("F")) {
-                    int forwarderIndex = -1;
-                    for (int i = 0; i < currentPath.size(); i++){
-                        if (currentPath.get(i).getFlag().equals("F")) {
-                            forwarderIndex = i;
-                            break;
-                        }
-                    }
-                    Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
-                    System.out.println("Forwarding ACK...");
-                    forward(nextPacket);
-                }
-    
-                if (flag.equals("S")) {
-                    int currentNumber = -1;
-                    oldMessage = oldMessage.substring(headerIndex + 1);
-                    System.out.println("ACK: " + oldMessage + " received");
-                    try {
-                        currentNumber = Integer.parseInt(oldMessage);
-                    } catch (NumberFormatException e) {
-                        System.out.println("Error parsing sequence number: " + e.getMessage());
-                    }
+                int currentNumber = -1;
+                oldMessage = oldMessage.substring(headerIndex + 1);
+                System.out.println("ACK: " + oldMessage + " received");
+
+                if (discovery) {
+                    /*
                     synchronized (ackReceived) {
                         if (currentNumber == sequenceNum) {
                             sequenceNum++;
+                            if (sequenceNum == NUM_ACKS) {
+                                sequenceNum = 0;
+                            }
                             ackReceived.set(true);
                             ackReceived.notify();
                         } else {
                             ackReceived.set(false);
+                        }
+                    }
+                    */
+                } else {
+
+                    if (flag.equals("F")) {
+                        int forwarderIndex = -1;
+                        for (int i = 0; i < currentPath.size(); i++){
+                            if (currentPath.get(i).getFlag().equals("F")) {
+                                forwarderIndex = i;
+                                break;
+                            }
+                        }
+                        Packet nextPacket = new Packet(oldMessage, id, currentPath.get(forwarderIndex - 1));
+                        System.out.println("Forwarding ACK...");
+                        forward(nextPacket);
+                    }
+
+                    if (flag.equals("S")) {
+                        try {
+                            currentNumber = Integer.parseInt(oldMessage);
+                        } catch (NumberFormatException e) {
+                            System.out.println("Error parsing sequence number: " + e.getMessage());
+                        }
+                        synchronized (ackReceived) {
+                            if (currentNumber == sequenceNum) {
+                                sequenceNum++;
+                                if (sequenceNum == NUM_ACKS) {
+                                    sequenceNum = 0;
+                                }
+                                ackReceived.set(true);
+                                ackReceived.notify();
+                            } else {
+                                ackReceived.set(false);
+                            }
                         }
                     }
                 }
@@ -583,12 +703,16 @@ public class RingoApp {
                     fileOut.write(dp.getData(), 0, dp.getLength());
                     System.out.println("Packet written to file");
                     fileOut.flush();
-                    sendAck();
+                    sendAck(currentPath.get(currentPath.size() - 2));
                 }
             }
         }
     }
 
+    /**
+     * Checks to see if a Ringo is a Forwarder and if so, forwards a packet
+     * @param message the message being forwarded
+     */
     private void forwarderCheck(String message) {
         if (flag.equals("F")) {
             int forwarderIndex = -1;
@@ -603,19 +727,30 @@ public class RingoApp {
         }
     }
 
-    private synchronized void sendAck() {
+    /**
+     * Sends an ACK packet
+     */
+    private synchronized void sendAck(Node dest) {
         String ackString = "ACK:" + sequenceNum;
         System.out.println(ackString);
-        Packet p = new Packet(ackString, id, currentPath.get(currentPath.size() - 2));
+        Packet p = new Packet(ackString, id, dest);
         sendPacket(p);
         sequenceNum++;
+        if (sequenceNum == NUM_ACKS) {
+            sequenceNum = 0;
+        }
     }
 
+    /**
+     * Controls the boolean flags behind the Ringo State Machine
+     */
     private synchronized void setFlags() {
         // Check to see if we know everyone
         if (discovery && ringo.active.size() == numRingos) {
             System.out.println("Discovery complete");
             discovery = false;
+            // Start keep alive thread
+            keepAliveThread.submit(new KeepAliveThread());
             rttCalc = true;
             calcRTTvectors();
         }
@@ -644,10 +779,20 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Forwards a packet along the ring
+     * @param p the packet being forwarded
+     */
     private void forward(Packet p) {
         sendPacket(p);
     }
 
+    /**
+     * Retrieves the cost between two nodes in the ring
+     * @param key the starting point on the ring
+     * @param dest the destination point on the ring
+     * @return the RTT between key and dest
+     */
     private synchronized long getCost(Node key, Node dest) {
         NodeTime[] costs = globalRTT.get(key);
         for (int i = 0; i < costs.length; i++) {
@@ -695,6 +840,9 @@ public class RingoApp {
     /**
      * Calculates the Round-Trip Time (RTT) by pinging a given IP address and port
      * and returning the amount of time it takes.
+     * @param ip IP address to be pinged
+     * @param port Port number of ip
+     * @return RTT from current ringo to given IP/Port combination
      */
     private static long calcRTT(String ip, int port) {
         try {
@@ -744,8 +892,8 @@ public class RingoApp {
                     InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                     int sendPort = neighbor.getPort();
                     String f = neighbor.getFlag();
-                    Packet pack = new Packet(payload, id, new Node(sendIp.toString(), sendPort, f));
-                    if (sendPort != port) {
+                    Packet pack = new Packet(payload, id, new Node(sendIp.toString(), sendPort, f));{
+                    if (sendPort != port)
                         sendPacket(pack);
                     }
                 } catch (UnknownHostException e) {
@@ -774,6 +922,7 @@ public class RingoApp {
 
     /**
      * Prints the global RTT matrix.
+     * @param mp the map data structure that holds the RTT matrix
      */
     public static void printMap(Map mp) {
         synchronized(mp) {
@@ -797,6 +946,10 @@ public class RingoApp {
         }
     }
 
+    /**
+     * Breaks a file into packets and sends them using Stop and Wait
+     * @throws IOException
+     */
     public void sendFile() throws IOException {
         byte[] sendData = new byte[MAX_PACKET_SIZE];
         File file = new File(sourceFilePath);
@@ -859,32 +1012,63 @@ public class RingoApp {
 
     /**
      * Returns the size of the global RTT matrix.
+     * @return the size of the global RTT matrix.
      */
     private synchronized int getSize() {
         return globalRTT.size();
     }
 
+    /**
+     * Class to send Keep Alive Packets to other ringos
+     */
     class SendAlivePackets extends TimerTask {
         public void run() {
             // Send the payload to every ringo
-            byte[] sendData = new byte[1024];
             String payload = "Alive:" + id.toString();
-            sendData = payload.getBytes();
             try {
                 for (int j = 0; j < ringo.active.size(); j++) {
                     Node neighbor = ringo.active.get(j);
                     InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
                     int sendPort = neighbor.getPort();
-                    if (sendPort != port && !ipaddr.equals(neighbor.getAddress())) {
-                        DatagramPacket p = new DatagramPacket(sendData, sendData.length, sendIp, sendPort);
-                        socket.send(p);
+                    String ip = sendIp.toString();
+                    if (ip.indexOf("/") != -1) {
+                        ip = ip.substring(ip.indexOf("/") + 1, ip.length());
                     }
-                    
+                    if (!id.equals(neighbor)) {
+                        Packet p = new Packet(payload, id, neighbor);
+                        sendPacket(p);
+                    }
+                }
+                try{
+                    Thread.sleep(10000);
+                } catch (InterruptedException e) {
+                    System.out.println(e.getMessage());
+                }
+
+                for (int i = 1; i < ringo.active.size(); i++) {
+                    Node b = ringo.active.get(i);
+                    if (!alive.contains(b)) {
+                        String payload1 = "Down: " + b.toString();
+                        for (int j = 0; j < ringo.active.size(); j++) {
+                            Node neighbor = ringo.active.get(j);
+                            InetAddress sendIp = InetAddress.getByName(neighbor.getAddress());
+                            int sendPort = neighbor.getPort();
+                            String ip = sendIp.toString();
+                            if (ip.indexOf("/") != -1) {
+                                ip = ip.substring(ip.indexOf("/") + 1, ip.length());
+                            }
+                            if (!id.equals(neighbor)) {
+                                Packet p = new Packet(payload1, id, neighbor);
+                                sendPacket(p);
+                            }
+                        }
+                    }
                 }
             } catch (IOException e) {
                 System.out.println("An I/O error has occurred while sending alive packet " + e.getMessage());
             }
-            
+
+        alive.clear();
         }
     }
 }
