@@ -163,10 +163,10 @@ public class RingoApp {
                     System.out.println("Can only send files from a Sender Ringo.");
                 } else {
                     fileName = input.substring(input.indexOf("d") + 2, input.length());
-                    sourceFilePath = System.getProperty("user.dir") + "\\" + fileName;
+                    sourceFilePath = System.getProperty("user.dir") + "/" + fileName;
                     if (!new File(sourceFilePath).exists())
                     {
-                        System.out.println("File does not exist!");
+                        System.out.println("File " + sourceFilePath + " does not exist!");
                     } else {
                         System.out.println("Sending file with path: " + sourceFilePath);
                         sendFileThread.submit(new SendFileThread());
@@ -503,7 +503,7 @@ public class RingoApp {
      * @param dp Packet received by the socket
      * @throws IOException
      */
-    private synchronized void receiveMessage(byte[] buffer, DatagramPacket dp) throws IOException {
+    private synchronized void receiveMessage(byte[] buffer, DatagramPacket dp) {
         String message = new String(buffer, 0, dp.getLength());
         String oldMessage = message;
         System.out.println(message);
@@ -659,10 +659,14 @@ public class RingoApp {
             else if (header.equals("4")) {
                 forwarderCheck(oldMessage);
                 if (flag.equals("R")) {
-                    // Construct destination file path (Note: change the name after the "//" to test sample output file)
-                    String destFilePath = System.getProperty("user.dir") + "//" + "output.txt"; //message.substring(headerIndex + 1);
+                    // Construct destination file path (Note: change the name after the "/" to test sample output file)
+                    String destFilePath = System.getProperty("user.dir") + "/" + message;
                     outFile = new File(destFilePath);
-                    fileOut = new FileOutputStream(outFile);
+                    try {
+                        fileOut = new FileOutputStream(outFile);
+                    } catch(IOException e) {
+                        System.out.println("Problem creating file output stream: " + e.getMessage());
+                    }
                 }
             }
 
@@ -739,12 +743,20 @@ public class RingoApp {
             if (flag.equals("R")) {
                 if (oldMessage.equals("x")) {
                     System.out.println("Closing file output stream");
-                    fileOut.close();
+                    try {
+                        fileOut.close();
+                    } catch (IOException e) {
+                        System.out.println("Problem closing file output stream: " + e.getMessage());
+                    } 
                 } else {
-                    fileOut.write(dp.getData(), 0, dp.getLength());
-                    System.out.println("Packet written to file");
-                    fileOut.flush();
-                    sendAck(currentPath.get(currentPath.size() - 2));
+                    try {
+                        fileOut.write(dp.getData(), 0, dp.getLength());
+                        System.out.println("Packet written to file");
+                        fileOut.flush();
+                        sendAck(currentPath.get(currentPath.size() - 2));
+                    } catch (IOException e) {
+                        System.out.println("Problem writing to file: " + e.getMessage());
+                    }
                 }
             }
         }
@@ -1073,9 +1085,6 @@ public class RingoApp {
                     receiveMessage(inFromRingo, receivePacket);
                 }
             } catch (Exception e) {
-                if (e instanceof IOException) {
-                    System.out.println("An I/O error has occurred " + e.getMessage());
-                }
                 if (e instanceof InterruptedException) {
                     System.out.println("Thread interrupted " + e.getMessage());
                 }
