@@ -1,8 +1,8 @@
-Suppose we want to ring a three node token-ring network:
+Suppose we want a 5 node token-ring network:
 
 1) Launch Ringo A
 
->> java RingoApp S 13000 0 0 3
+>> java RingoApp S 1300 0 0 5
 Welcome to Ringo!
 #### Ringo commands ####
 1) send <filename>
@@ -10,11 +10,11 @@ Welcome to Ringo!
 3) show-ring
 4) offline <seconds>
 5) disconnect
+
 Ringo command:
 
-
 2) Launch Ringo B
->> java RingoApp F 13001 localhost 13000 3
+>> java RingoApp F 1301 localhost 1300 5
 Welcome to Ringo!
 #### Ringo commands ####
 1) send <filename>
@@ -22,10 +22,11 @@ Welcome to Ringo!
 3) show-ring
 4) offline <seconds>
 5) disconnect
+
 Ringo command:
 
 3) Launch Ringo C
->> java RingoApp S 13002 localhost 13001 3
+>> java RingoApp F 1302 localhost 1301 5
 Welcome to Ringo!
 #### Ringo commands ####
 1) send <filename>
@@ -33,15 +34,113 @@ Welcome to Ringo!
 3) show-ring
 4) offline <seconds>
 5) disconnect
--------------------------------------------------------------------------------------
-ONCE ALL NODES ARE UP, YOU MAY RUN THE FOLLOWING COMMANDS
 
+Ringo command:
+
+4) Launch Ringo D
+>> java RingoApp F 1304 localhost 1301 5
+Welcome to Ringo!
+#### Ringo commands ####
+1) send <filename>
+2) show-matrix
+3) show-ring
+4) offline <seconds>
+5) disconnect
+
+Ringo command:
+
+5) Launch Ringo E
+>> java RingoApp R 1303 localhost 1302 5
+Welcome to Ringo!
+#### Ringo commands ####
+1) send <filename>
+2) show-matrix
+3) show-ring
+4) offline <seconds>
+5) disconnect
+
+Ringo command:
+
+ONCE ALL NODES ARE UP, YOU MAY RUN THE FOLLOWING COMMANDS:
+
+-------------
+| SHOW-RING |
+-------------
 Ringo command: show-ring
 #### Optimal ring ####
-(169.254.246.145,13002) <--> (169.254.246.145,13001) <--> (169.254.246.145,13000)
+(169.254.246.145,1303,R) <--> (169.254.246.145,1301,F) <--> (169.254.246.145,1304,F) <--> (169.254.246.145,1300,S) <--> (169.254.246.145,1302,F)
+
+---------------
+| SHOW-MATRIX |
+---------------
 Ringo command: show-matrix
 #### Global RTT Matrix ####
-Format: A = (A, RTT) | (B, RTT) | (C,RTT)
-(169.254.246.145,13002) = ((169.254.246.145,13002),0)|((169.254.246.145,13001),2)|((169.254.246.145,13000),0)
+Format: A = (A, RTT) | (B, RTT) | (C,RTT) | ...
+(169.254.246.145,1303,R) = ((169.254.246.145,1303,R),0)|((169.254.246.145,1304,F),5)|((169.254.246.145,1302,F),0)|((169.254.246.145,13
+00,S),0)|((169.254.246.145,1301,F),0)
+(169.254.246.145,1304,F) = ((169.254.246.145,1304,F),0)|((169.254.246.145,1301,F),8)|((169.254.246.145,1302,F),0)|((169.254.246.145,13
+00,S),0)|((169.254.246.145,1303,R),0)
+(169.254.246.145,1301,F) = ((169.254.246.145,1301,F),0)|((169.254.246.145,1300,S),8)|((169.254.246.145,1302,F),0)|((169.254.246.145,13
+04,F),0)|((169.254.246.145,1303,R),0)
+(169.254.246.145,1302,F) = ((169.254.246.145,1302,F),0)|((169.254.246.145,1301,F),9)|((169.254.246.145,1300,S),1)|((169.254.246.145,13
+04,F),0)|((169.254.246.145,1303,R),0)
+(169.254.246.145,1300,S) = ((169.254.246.145,1300,S),0)|((169.254.246.145,1301,F),8)|((169.254.246.145,1302,F),0)|((169.254.246.145,13
+04,F),0)|((169.254.246.145,1303,R),1)
+
+------------------
+| OFFLINE <TIME> |
+------------------
+Ringo command: offline 10
+Ringo going offline for 10 seconds
+...
+Ringo back online!
+
+OTHER 4 NODES OUTPUT:
+Ringo command: Node (169.254.246.145,1300,S) is down.
+Switching optimal path to use other path.
+Node (169.254.246.145,1300,S) is down.
+Switching optimal path to use other path.
+Node (169.254.246.145,1300,S) is down.
+Switching optimal path to use other path.
+
+-------------------
+| SEND <FILENAME> |
+-------------------
+Ringo command: send test.txt
+Sending file with path: FILE_PATH/test.txt
+
+RECEIVER NODE OUTPUT:
+Ringo command: Sending ACK:0
+Sending ACK:1
+File transmission successful. Data written to file.
+
+Ringo command: send test1.txt
+Sending file with path: FILE_PATH/test1.txt
+
+RECEIVER NODE OUTPUT:
+Sending ACK:2
+Sending ACK:3
+Sending ACK:4
+Sending ACK:5
+Sending ACK:6
+Sending ACK:7
+Sending ACK:8
+Sending ACK:9
+Sending ACK:10
+Sending ACK:11
+Sending ACK:12
+Sending ACK:13
+Sending ACK:14
+Sending ACK:15
+Sending ACK:16
+Sending ACK:17
+Sending ACK:18
+Sending ACK:19
+File transmission successful. Data written to file.
+Sending ACK:20
+
+--------------
+| DISCONNECT |
+--------------
 Ringo command: disconnect
 >>

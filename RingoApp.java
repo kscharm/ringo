@@ -732,6 +732,7 @@ public class RingoApp {
     private synchronized void sendAck(Node dest) {
         String ackString = "ACK:" + sequenceNum;
         Packet p = new Packet(ackString, id, dest);
+        System.out.println("Sending " + ackString);
         sendPacket(p);
         sequenceNum++;
         if (sequenceNum == NUM_ACKS) {
